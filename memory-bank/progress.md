@@ -1,9 +1,11 @@
 # Progress
 
 ## Current Status
-Phase 2 started: backend now integrates real OpenAI transcription/rewrite pipeline; iOS runtime config + privacy template prepared for device testing.
+Core MVP loop is validated on physical iPhone: record → transcribe → rewrite/coaching works end-to-end.
 
 Latest direction update: user validated physical-device run and requested a personal-use path to run without local backend-proxy dependency.
+
+Latest stabilization update: realtime on-device transcript display has been reworked to reduce pause-related clearing, long-silence resets, and duplication artifacts; further tuning remains for rare duplicate sentence cases.
 
 ## What Works (Documented)
 - Clear project vision and user flow.
@@ -30,21 +32,41 @@ Latest direction update: user validated physical-device run and requested a pers
 - Added `backend-proxy/.env.example` for backend env configuration.
 - Added iOS API base URL overrides (env + UserDefaults) via `AppConfig` to support physical-device LAN testing.
 - Added `ios/CoachMobileApp/Info.plist.example` with microphone and speech privacy usage keys.
+- End-to-end flow on real iPhone is confirmed working by user.
+- Recording UX has been upgraded with explicit controls:
+  - Record, Pause/Resume, Stop actions
+  - live recording timer display during capture
+  - paused-state handling and processing disable while capture is active
+- Realtime STT plumbing has been upgraded:
+  - live transcription callback now carries `isFinal` metadata (`LiveTranscriptionUpdate`)
+  - ViewModel now uses finalized + partial buffers for live transcript assembly
+  - pause/stop boundaries finalize current partial segment to preserve visible text
+  - overlap/containment merge heuristics added to reduce repeated sentence appends
+- Settings tab is now functional (no longer placeholder):
+  - OpenAI credit refresh/display (best-effort)
+  - OpenAI month-to-date usage refresh/display (best-effort)
+  - direct OpenAI billing dashboard link
+- Backend proxy now includes settings observability endpoints:
+  - `GET /v1/openai-credit`
+  - `GET /v1/openai-usage-month`
+  - graceful fallback messaging when account/role/key scope cannot access billing/cost data
 
 ## What’s Left to Build
-1. Create/commit Xcode project configuration and wire all files into target.
-2. Wire iOS privacy usage descriptions into actual target `Info.plist`.
-3. Validate full end-to-end flow on real iPhone with live backend key and LAN URL.
-4. Add transcription strategy layer (on-device first, cloud fallback) as runtime behavior.
-5. Persist sessions (SwiftData) and build history browsing UI.
-6. Add tests (ViewModel/use-case unit tests + backend contract tests) and basic analytics/error tracking.
-7. Add optional direct-to-OpenAI iOS mode for personal prototype operation (while keeping proxy mode for security/release).
+1. Confirm/document canonical iOS source path and clean duplicate folder ambiguity.
+2. Ensure actual target `Info.plist` values match privacy template in committed project configuration.
+3. Add transcription strategy layer (on-device first, cloud fallback) as runtime behavior.
+4. Persist sessions (SwiftData) and build history browsing UI.
+5. Add tests (ViewModel/use-case unit tests + backend contract tests) and basic analytics/error tracking.
+6. Add optional direct-to-OpenAI iOS mode for personal prototype operation (while keeping proxy mode for security/release).
+7. Continue refining realtime merge heuristics to eliminate occasional repeated sentence artifacts after long pauses/re-segmentation.
 
 ## Known Risks / Considerations
 - Latency and quality trade-offs between local and cloud transcription.
 - Prompt drift if response formatting is not strictly constrained.
 - Cost control required for transcription + generation at scale.
 - App Store/privacy disclosures needed for cloud audio processing.
+- OpenAI billing/cost API access is inconsistent across account types and permission scopes; "credit remaining" may be unavailable even with a valid API key.
+- Apple Speech partial/final segmentation can vary by pause cadence and locale, creating edge cases where live text may still duplicate unless merge logic is carefully tuned.
 
 ## Next Milestone
-Deliver first runnable iPhone MVP by finishing Xcode target wiring/privacy keys and validating record → process → rewrite pipeline against live backend.
+Move from validated MVP to durable v1 baseline: canonicalized project structure, persisted history, initial automated tests, and clearer settings diagnostics for billing endpoint restrictions.

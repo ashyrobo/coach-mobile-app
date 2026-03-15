@@ -230,6 +230,107 @@ async function rewriteAndCoach({ mode, transcript }) {
   };
 }
 
+async function fetchOpenAICreditSummary() {
+  const response = await fetch("https://api.openai.com/dashboard/billing/credit_grants", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    return {
+      remainingUSD: null,
+      message: `OpenAI billing endpoint unavailable (${response.status}). ${text || ""}`.trim()
+    };
+  }
+
+  const payload = await response.json();
+  const total = Number(payload?.total_granted ?? 0);
+  const used = Number(payload?.total_used ?? 0);
+  const available = Number(payload?.total_available ?? total - used);
+
+  if (!Number.isFinite(available)) {
+    return {
+      remainingUSD: null,
+      message: "OpenAI billing payload did not include a usable credit balance."
+    };
+  }
+
+  return {
+    remainingUSD: Math.max(0, available),
+    message: null
+  };
+}
+
+function unixSecondsAtStartOfCurrentMonth() {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
+  return Math.floor(start.getTime() / 1000);
+}
+
+function unixSecondsNow() {
+  return Math.floor(Date.now() / 1000);
+}
+
+function parseCostAmountUSD(payload) {
+  const direct = Number(payload?.amount?.value ?? payload?.total?.value ?? payload?.total_cost?.value);
+  if (Number.isFinite(direct)) return direct;
+
+  const entries = payload?.data;
+  if (!Array.isArray(entries)) return null;
+
+  let total = 0;
+  let found = false;
+  for (const row of entries) {
+    const amount = Number(row?.amount?.value ?? row?.cost?.value ?? row?.total?.value ?? 0);
+    if (Number.isFinite(amount)) {
+      total += amount;
+      found = true;
+    }
+  }
+
+  return found ? total : null;
+}
+
+async function fetchOpenAIMonthlyUsageSummary() {
+  const startTime = unixSecondsAtStartOfCurrentMonth();
+  const endTime = unixSecondsNow();
+  const endpoint = new URL("https://api.openai.com/v1/organization/costs");
+  endpoint.searchParams.set("start_time", String(startTime));
+  endpoint.searchParams.set("end_time", String(endTime));
+
+  const response = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    return {
+      monthToDateUSD: null,
+      message: `OpenAI usage endpoint unavailable (${response.status}). ${text || ""}`.trim()
+    };
+  }
+
+  const payload = await response.json();
+  const amount = parseCostAmountUSD(payload);
+  if (!Number.isFinite(amount)) {
+    return {
+      monthToDateUSD: null,
+      message: "OpenAI usage payload did not include a usable monthly cost amount."
+    };
+  }
+
+  return {
+    monthToDateUSD: Math.max(0, amount),
+    message: null
+  };
+}
+
 const server = createServer(async (req, res) => {
   if (!req.url || !req.method) {
     return sendJson(res, 400, { error: "Invalid request" });
@@ -240,6 +341,44 @@ const server = createServer(async (req, res) => {
       status: "ok",
       openai_configured: Boolean(OPENAI_API_KEY)
     });
+  }
+
+  if (req.method === "GET" && req.url === "/v1/openai-credit") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        remainingUSD: null,
+        message: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const credit = await fetchOpenAICreditSummary();
+      return sendJson(res, 200, credit);
+    } catch (error) {
+      return sendJson(res, 200, {
+        remainingUSD: null,
+        message: `Could not fetch OpenAI credit. ${error instanceof Error ? error.message : "Unknown error."}`
+      });
+    }
+  }
+
+  if (req.method === "GET" && req.url === "/v1/openai-usage-month") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        monthToDateUSD: null,
+        message: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const usage = await fetchOpenAIMonthlyUsageSummary();
+      return sendJson(res, 200, usage);
+    } catch (error) {
+      return sendJson(res, 200, {
+        monthToDateUSD: null,
+        message: `Could not fetch OpenAI usage. ${error instanceof Error ? error.message : "Unknown error."}`
+      });
+    }
   }
 
   if (req.method === "POST" && req.url === "/v1/process-audio") {

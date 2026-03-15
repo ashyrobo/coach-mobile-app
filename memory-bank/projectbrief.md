@@ -26,3 +26,6 @@ Build an iPhone app that helps users improve spoken/written English by transform
 - Rewrite modes produce clearly distinct outputs.
 - Coaching tips are useful, concise, and actionable.
 - Privacy and API key security follow production-safe patterns.
+
+## Validation Snapshot
+- MVP core loop has been validated on a physical iPhone (record → transcribe → rewrite/coaching).

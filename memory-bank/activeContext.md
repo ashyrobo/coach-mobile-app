@@ -1,14 +1,56 @@
 # Active Context
 
 ## Current Focus
-Execute **Phase 2 MVP runtime integration**: replace backend placeholders with real OpenAI processing and prepare device runtime configuration.
+Move from initial integration to **post-MVP stabilization** now that end-to-end iPhone flow is validated.
+
+Latest UI/UX pass focused on:
+- richer in-session recording controls (record/pause/resume/stop + live timer)
+- settings observability for OpenAI account usage/cost visibility
+
+Latest reliability pass focused on:
+- stabilizing **on-device realtime transcription UX** during long pauses and pause/resume cycles
 
 ## User Preference Update (Latest)
 - User successfully ran/tested app on physical iPhone.
 - User wants an **independent app mode** that does not rely on `backend-proxy` for day-to-day personal use.
 - User asked about embedding OpenAI key client-side for single-user usage.
 
+## Repository Structure Note
+- Multiple iOS trees currently exist in repo (`ios/CoachMobileApp`, `CoachMobileApp/CoachMobileApp 2`, and Xcode project paths).
+- Next cleanup pass should confirm and document the canonical source path used for active development.
+
 ## Recent Changes
+- Reworked live transcription contract in active iOS tree (`CoachMobileApp/CoachMobileApp 2`):
+  - `AudioRecorderServicing.setLiveTranscriptionHandler` now sends `LiveTranscriptionUpdate { text, isFinal }`
+  - `AudioRecorderService` now forwards `SFSpeechRecognizer` finalization state instead of text-only callbacks
+- Reworked ViewModel live transcript assembly (`VoiceSessionViewModel`):
+  - dual-buffer model: `finalizedLiveTranscript` + `currentPartialLiveTranscript`
+  - composed display text avoids full-screen wipe during recognizer segment refreshes
+  - pause action now promotes current partial into finalized text to keep transcript visible while paused
+  - stop action finalizes remaining partial before setting transcript snapshot
+  - overlap/canonicalization heuristics added to reduce duplicated sentence merges
+- Added long-pause protection:
+  - when recognizer emits a newly segmented partial after silence, prior partial is promoted before replacement
+  - empty partial callbacks are ignored to prevent visual clearing
+
+- Updated active iOS UX in `CoachMobileApp/CoachMobileApp 2/Presentation/Home`:
+  - replaced single toggle record button with explicit **Record / Pause-Resume / Stop** controls
+  - added live recording timer (`mm:ss`) and paused-state indicator
+  - disabled processing while recording is active or paused
+- Extended audio recording abstraction:
+  - `AudioRecorderServicing` now includes `pauseRecording`, `resumeRecording`, and `currentRecordingTime`
+  - `AudioRecorderService` now tracks/stores latest recording duration for stable UI display after stop
+- Expanded `VoiceSessionViewModel` recording state handling:
+  - explicit `idle/recording/paused` state model
+  - timer updates via Combine publisher
+- Replaced Settings placeholder with actionable billing/usage screen:
+  - OpenAI credit display + refresh
+  - OpenAI month-to-date usage display + refresh
+  - direct link to OpenAI billing dashboard in Safari
+- Added backend proxy support for settings observability:
+  - `GET /v1/openai-credit`
+  - `GET /v1/openai-usage-month`
+  - graceful fallback payloads when OpenAI account/key lacks billing or org-cost API access
 - Implemented iOS app scaffold under `ios/CoachMobileApp` with layered folders:
   - `Presentation/Home` (`HomeView`, `VoiceSessionViewModel`)
   - `Domain/Models` (`RewriteMode`, `RewriteResult`, `VoiceSession`)
@@ -53,11 +95,12 @@ Execute **Phase 2 MVP runtime integration**: replace backend placeholders with r
 - Fail safely: if upstream AI fails, return deterministic fallback payload to keep UI pipeline stable during MVP iteration.
 
 ## Immediate Next Steps
-1. Wire `Info.plist.example` values into actual Xcode target `Info.plist` and verify permission prompts on-device.
-2. Start backend proxy with real `OPENAI_API_KEY` and validate `/health` + `/v1/process-audio` end-to-end.
-3. Configure iPhone runtime API URL using `VOICE_API_BASE_URL` (Mac LAN IP + port).
-4. Add local history persistence (SwiftData) and history UI.
-5. Add unit tests for ViewModel/use case and contract tests for backend response schema.
+1. Document canonical iOS source-of-truth path and remove ambiguity between duplicate folders.
+2. Add local history persistence (SwiftData) and history UI.
+3. Add unit tests for ViewModel/use case and contract tests for backend response schema.
+4. Implement/validate optional direct OpenAI mode for personal use while preserving proxy mode for secure/release path.
+5. Improve settings diagnostics to distinguish: missing backend key vs restricted OpenAI role/scope vs unsupported endpoint.
+6. Continue tuning realtime STT merge behavior to eliminate occasional duplicate phrase/sentence artifacts after speech segmentation changes.
 
 ## Revised Near-Term Plan
 1. Add/plan a **Direct OpenAI mode** in iOS (no backend proxy) for personal prototype usage.

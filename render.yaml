@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: coach-backend-proxy
+    runtime: node
+    rootDir: backend-proxy
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_TRANSCRIPTION_MODEL
+        value: gpt-4o-mini-transcribe
+      - key: OPENAI_CHAT_MODEL
+        value: gpt-4o-mini

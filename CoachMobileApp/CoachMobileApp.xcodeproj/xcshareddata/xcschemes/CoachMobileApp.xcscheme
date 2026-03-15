@@ -77,7 +77,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "VOICE_API_BASE_URL"
-            value = "http://192.168.0.21:8787"
+            value = "https://coach-backend-proxy.onrender.com"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
