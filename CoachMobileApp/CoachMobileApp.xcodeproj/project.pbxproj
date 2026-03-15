@@ -1,0 +1,742 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		414E176C2F612917001F8F95 /* Info.plist.example in Resources */ = {isa = PBXBuildFile; fileRef = 414E176A2F612917001F8F95 /* Info.plist.example */; };
+		414E176D2F612917001F8F95 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17512F612917001F8F95 /* AppConfig.swift */; };
+		414E176E2F612917001F8F95 /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17532F612917001F8F95 /* AudioRecorderService.swift */; };
+		414E176F2F612917001F8F95 /* VoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E175C2F612917001F8F95 /* VoiceSession.swift */; };
+		414E17702F612917001F8F95 /* RewriteResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E175B2F612917001F8F95 /* RewriteResult.swift */; };
+		414E17712F612917001F8F95 /* VoiceProcessingServicing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17602F612917001F8F95 /* VoiceProcessingServicing.swift */; };
+		414E17722F612917001F8F95 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17652F612917001F8F95 /* HomeView.swift */; };
+		414E17732F612917001F8F95 /* VoiceProcessingAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17552F612917001F8F95 /* VoiceProcessingAPIService.swift */; };
+		414E17742F612917001F8F95 /* AudioRecorderServicing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E175E2F612917001F8F95 /* AudioRecorderServicing.swift */; };
+		414E17752F612917001F8F95 /* CoachMobileAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17692F612917001F8F95 /* CoachMobileAppApp.swift */; };
+		414E17762F612917001F8F95 /* VoiceSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17662F612917001F8F95 /* VoiceSessionViewModel.swift */; };
+		414E17772F612917001F8F95 /* ProcessVoiceSessionUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17622F612917001F8F95 /* ProcessVoiceSessionUseCase.swift */; };
+		414E17782F612917001F8F95 /* RewriteMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E175A2F612917001F8F95 /* RewriteMode.swift */; };
+		414E17792F612917001F8F95 /* PermissionServicing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E175F2F612917001F8F95 /* PermissionServicing.swift */; };
+		414E177A2F612917001F8F95 /* AppError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17582F612917001F8F95 /* AppError.swift */; };
+		414E177B2F612917001F8F95 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414E17542F612917001F8F95 /* PermissionService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		414E17352F6127AE001F8F95 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 414E171F2F6127AC001F8F95 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 414E17262F6127AC001F8F95;
+			remoteInfo = CoachMobileApp;
+		};
+		414E173F2F6127AE001F8F95 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 414E171F2F6127AC001F8F95 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 414E17262F6127AC001F8F95;
+			remoteInfo = CoachMobileApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		414E17272F6127AC001F8F95 /* CoachMobileApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CoachMobileApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		414E17342F6127AE001F8F95 /* CoachMobileAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoachMobileAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		414E173E2F6127AE001F8F95 /* CoachMobileAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoachMobileAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		414E17512F612917001F8F95 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		414E17532F612917001F8F95 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
+		414E17542F612917001F8F95 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
+		414E17552F612917001F8F95 /* VoiceProcessingAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProcessingAPIService.swift; sourceTree = "<group>"; };
+		414E17582F612917001F8F95 /* AppError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppError.swift; sourceTree = "<group>"; };
+		414E175A2F612917001F8F95 /* RewriteMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteMode.swift; sourceTree = "<group>"; };
+		414E175B2F612917001F8F95 /* RewriteResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteResult.swift; sourceTree = "<group>"; };
+		414E175C2F612917001F8F95 /* VoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSession.swift; sourceTree = "<group>"; };
+		414E175E2F612917001F8F95 /* AudioRecorderServicing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderServicing.swift; sourceTree = "<group>"; };
+		414E175F2F612917001F8F95 /* PermissionServicing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionServicing.swift; sourceTree = "<group>"; };
+		414E17602F612917001F8F95 /* VoiceProcessingServicing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProcessingServicing.swift; sourceTree = "<group>"; };
+		414E17622F612917001F8F95 /* ProcessVoiceSessionUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessVoiceSessionUseCase.swift; sourceTree = "<group>"; };
+		414E17652F612917001F8F95 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		414E17662F612917001F8F95 /* VoiceSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionViewModel.swift; sourceTree = "<group>"; };
+		414E17692F612917001F8F95 /* CoachMobileAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMobileAppApp.swift; sourceTree = "<group>"; };
+		414E176A2F612917001F8F95 /* Info.plist.example */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Info.plist.example; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		414E17292F6127AC001F8F95 /* CoachMobileApp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CoachMobileApp;
+			sourceTree = "<group>";
+		};
+		414E17372F6127AE001F8F95 /* CoachMobileAppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CoachMobileAppTests;
+			sourceTree = "<group>";
+		};
+		414E17412F6127AE001F8F95 /* CoachMobileAppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CoachMobileAppUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		414E17242F6127AC001F8F95 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		414E17312F6127AE001F8F95 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		414E173B2F6127AE001F8F95 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		414E171E2F6127AC001F8F95 = {
+			isa = PBXGroup;
+			children = (
+				414E17292F6127AC001F8F95 /* CoachMobileApp */,
+				414E17372F6127AE001F8F95 /* CoachMobileAppTests */,
+				414E17412F6127AE001F8F95 /* CoachMobileAppUITests */,
+				414E17282F6127AC001F8F95 /* Products */,
+				414E176B2F612917001F8F95 /* CoachMobileApp 2 */,
+			);
+			sourceTree = "<group>";
+		};
+		414E17282F6127AC001F8F95 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				414E17272F6127AC001F8F95 /* CoachMobileApp.app */,
+				414E17342F6127AE001F8F95 /* CoachMobileAppTests.xctest */,
+				414E173E2F6127AE001F8F95 /* CoachMobileAppUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		414E17522F612917001F8F95 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				414E17512F612917001F8F95 /* AppConfig.swift */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		414E17562F612917001F8F95 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				414E17532F612917001F8F95 /* AudioRecorderService.swift */,
+				414E17542F612917001F8F95 /* PermissionService.swift */,
+				414E17552F612917001F8F95 /* VoiceProcessingAPIService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		414E17572F612917001F8F95 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				414E17522F612917001F8F95 /* Config */,
+				414E17562F612917001F8F95 /* Services */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		414E17592F612917001F8F95 /* Errors */ = {
+			isa = PBXGroup;
+			children = (
+				414E17582F612917001F8F95 /* AppError.swift */,
+			);
+			path = Errors;
+			sourceTree = "<group>";
+		};
+		414E175D2F612917001F8F95 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				414E175A2F612917001F8F95 /* RewriteMode.swift */,
+				414E175B2F612917001F8F95 /* RewriteResult.swift */,
+				414E175C2F612917001F8F95 /* VoiceSession.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		414E17612F612917001F8F95 /* Protocols */ = {
+			isa = PBXGroup;
+			children = (
+				414E175E2F612917001F8F95 /* AudioRecorderServicing.swift */,
+				414E175F2F612917001F8F95 /* PermissionServicing.swift */,
+				414E17602F612917001F8F95 /* VoiceProcessingServicing.swift */,
+			);
+			path = Protocols;
+			sourceTree = "<group>";
+		};
+		414E17632F612917001F8F95 /* UseCases */ = {
+			isa = PBXGroup;
+			children = (
+				414E17622F612917001F8F95 /* ProcessVoiceSessionUseCase.swift */,
+			);
+			path = UseCases;
+			sourceTree = "<group>";
+		};
+		414E17642F612917001F8F95 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				414E17592F612917001F8F95 /* Errors */,
+				414E175D2F612917001F8F95 /* Models */,
+				414E17612F612917001F8F95 /* Protocols */,
+				414E17632F612917001F8F95 /* UseCases */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		414E17672F612917001F8F95 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				414E17652F612917001F8F95 /* HomeView.swift */,
+				414E17662F612917001F8F95 /* VoiceSessionViewModel.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		414E17682F612917001F8F95 /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				414E17672F612917001F8F95 /* Home */,
+			);
+			path = Presentation;
+			sourceTree = "<group>";
+		};
+		414E176B2F612917001F8F95 /* CoachMobileApp 2 */ = {
+			isa = PBXGroup;
+			children = (
+				414E17572F612917001F8F95 /* Data */,
+				414E17642F612917001F8F95 /* Domain */,
+				414E17682F612917001F8F95 /* Presentation */,
+				414E17692F612917001F8F95 /* CoachMobileAppApp.swift */,
+				414E176A2F612917001F8F95 /* Info.plist.example */,
+			);
+			path = "CoachMobileApp 2";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		414E17262F6127AC001F8F95 /* CoachMobileApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 414E17482F6127AE001F8F95 /* Build configuration list for PBXNativeTarget "CoachMobileApp" */;
+			buildPhases = (
+				414E17232F6127AC001F8F95 /* Sources */,
+				414E17242F6127AC001F8F95 /* Frameworks */,
+				414E17252F6127AC001F8F95 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				414E17292F6127AC001F8F95 /* CoachMobileApp */,
+			);
+			name = CoachMobileApp;
+			packageProductDependencies = (
+			);
+			productName = CoachMobileApp;
+			productReference = 414E17272F6127AC001F8F95 /* CoachMobileApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		414E17332F6127AE001F8F95 /* CoachMobileAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 414E174B2F6127AE001F8F95 /* Build configuration list for PBXNativeTarget "CoachMobileAppTests" */;
+			buildPhases = (
+				414E17302F6127AE001F8F95 /* Sources */,
+				414E17312F6127AE001F8F95 /* Frameworks */,
+				414E17322F6127AE001F8F95 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				414E17362F6127AE001F8F95 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				414E17372F6127AE001F8F95 /* CoachMobileAppTests */,
+			);
+			name = CoachMobileAppTests;
+			packageProductDependencies = (
+			);
+			productName = CoachMobileAppTests;
+			productReference = 414E17342F6127AE001F8F95 /* CoachMobileAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		414E173D2F6127AE001F8F95 /* CoachMobileAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 414E174E2F6127AE001F8F95 /* Build configuration list for PBXNativeTarget "CoachMobileAppUITests" */;
+			buildPhases = (
+				414E173A2F6127AE001F8F95 /* Sources */,
+				414E173B2F6127AE001F8F95 /* Frameworks */,
+				414E173C2F6127AE001F8F95 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				414E17402F6127AE001F8F95 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				414E17412F6127AE001F8F95 /* CoachMobileAppUITests */,
+			);
+			name = CoachMobileAppUITests;
+			packageProductDependencies = (
+			);
+			productName = CoachMobileAppUITests;
+			productReference = 414E173E2F6127AE001F8F95 /* CoachMobileAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		414E171F2F6127AC001F8F95 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					414E17262F6127AC001F8F95 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					414E17332F6127AE001F8F95 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 414E17262F6127AC001F8F95;
+					};
+					414E173D2F6127AE001F8F95 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 414E17262F6127AC001F8F95;
+					};
+				};
+			};
+			buildConfigurationList = 414E17222F6127AC001F8F95 /* Build configuration list for PBXProject "CoachMobileApp" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 414E171E2F6127AC001F8F95;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 414E17282F6127AC001F8F95 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				414E17262F6127AC001F8F95 /* CoachMobileApp */,
+				414E17332F6127AE001F8F95 /* CoachMobileAppTests */,
+				414E173D2F6127AE001F8F95 /* CoachMobileAppUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		414E17252F6127AC001F8F95 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				414E176C2F612917001F8F95 /* Info.plist.example in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		414E17322F6127AE001F8F95 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		414E173C2F6127AE001F8F95 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		414E17232F6127AC001F8F95 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				414E176D2F612917001F8F95 /* AppConfig.swift in Sources */,
+				414E176E2F612917001F8F95 /* AudioRecorderService.swift in Sources */,
+				414E176F2F612917001F8F95 /* VoiceSession.swift in Sources */,
+				414E17702F612917001F8F95 /* RewriteResult.swift in Sources */,
+				414E17712F612917001F8F95 /* VoiceProcessingServicing.swift in Sources */,
+				414E17722F612917001F8F95 /* HomeView.swift in Sources */,
+				414E17732F612917001F8F95 /* VoiceProcessingAPIService.swift in Sources */,
+				414E17742F612917001F8F95 /* AudioRecorderServicing.swift in Sources */,
+				414E17752F612917001F8F95 /* CoachMobileAppApp.swift in Sources */,
+				414E17762F612917001F8F95 /* VoiceSessionViewModel.swift in Sources */,
+				414E17772F612917001F8F95 /* ProcessVoiceSessionUseCase.swift in Sources */,
+				414E17782F612917001F8F95 /* RewriteMode.swift in Sources */,
+				414E17792F612917001F8F95 /* PermissionServicing.swift in Sources */,
+				414E177A2F612917001F8F95 /* AppError.swift in Sources */,
+				414E177B2F612917001F8F95 /* PermissionService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		414E17302F6127AE001F8F95 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		414E173A2F6127AE001F8F95 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		414E17362F6127AE001F8F95 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 414E17262F6127AC001F8F95 /* CoachMobileApp */;
+			targetProxy = 414E17352F6127AE001F8F95 /* PBXContainerItemProxy */;
+		};
+		414E17402F6127AE001F8F95 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 414E17262F6127AC001F8F95 /* CoachMobileApp */;
+			targetProxy = 414E173F2F6127AE001F8F95 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		414E17462F6127AE001F8F95 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		414E17472F6127AE001F8F95 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		414E17492F6127AE001F8F95 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Coach needs microphone access to record your speaking practice.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Coach uses speech recognition to transcribe your recordings for rewriting and coaching.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ashy.CoachMobileApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		414E174A2F6127AE001F8F95 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Coach needs microphone access to record your speaking practice.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Coach uses speech recognition to transcribe your recordings for rewriting and coaching.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ashy.CoachMobileApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		414E174C2F6127AE001F8F95 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ashy.CoachMobileAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CoachMobileApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CoachMobileApp";
+			};
+			name = Debug;
+		};
+		414E174D2F6127AE001F8F95 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ashy.CoachMobileAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CoachMobileApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CoachMobileApp";
+			};
+			name = Release;
+		};
+		414E174F2F6127AE001F8F95 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ashy.CoachMobileAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CoachMobileApp;
+			};
+			name = Debug;
+		};
+		414E17502F6127AE001F8F95 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GRS2C9GKMC;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ashy.CoachMobileAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CoachMobileApp;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		414E17222F6127AC001F8F95 /* Build configuration list for PBXProject "CoachMobileApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				414E17462F6127AE001F8F95 /* Debug */,
+				414E17472F6127AE001F8F95 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		414E17482F6127AE001F8F95 /* Build configuration list for PBXNativeTarget "CoachMobileApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				414E17492F6127AE001F8F95 /* Debug */,
+				414E174A2F6127AE001F8F95 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		414E174B2F6127AE001F8F95 /* Build configuration list for PBXNativeTarget "CoachMobileAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				414E174C2F6127AE001F8F95 /* Debug */,
+				414E174D2F6127AE001F8F95 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		414E174E2F6127AE001F8F95 /* Build configuration list for PBXNativeTarget "CoachMobileAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				414E174F2F6127AE001F8F95 /* Debug */,
+				414E17502F6127AE001F8F95 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 414E171F2F6127AC001F8F95 /* Project object */;
+}
