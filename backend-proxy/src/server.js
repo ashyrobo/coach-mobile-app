@@ -30,10 +30,26 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
 const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime";
 
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  if (chunks.length === 0) return {};
+
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return {};
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
 }
 
 function parseMultipart(buffer, boundary) {
@@ -74,8 +90,6 @@ function tipsCountForMode(mode) {
 
 function promptForMode(mode) {
   switch (mode) {
-    case "fullSentence":
-      return "Convert fragmented or informal speech into clear, complete, grammatically correct sentences while preserving meaning.";
     case "rewordBetter":
       return "Improve fluency and professionalism while preserving intent. Keep it natural and concise.";
     case "summarize":
@@ -88,17 +102,6 @@ function createFallbackResponse(mode, transcriptText) {
   const transcript = transcriptText || "Transcription unavailable.";
 
   switch (mode) {
-    case "fullSentence":
-      return {
-        transcript,
-        final_text: "I would like to improve my English fluency by practicing clear, complete sentences every day.",
-        tips: [
-          "Use a subject and verb in every sentence.",
-          "Prefer one clear idea per sentence.",
-          "Read your sentence aloud to catch missing words."
-        ],
-        grammar_fixes: ["Converted fragmented phrasing into complete sentence structure."]
-      };
     case "rewordBetter":
       return {
         transcript,
@@ -175,7 +178,7 @@ async function transcribeAudio(audioFile) {
 async function rewriteAndCoach({ mode, transcript }) {
   const tipCount = tipsCountForMode(mode);
   const modeInstruction = promptForMode(mode);
-  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "final_text": "string",\n  "tips": ["string"],\n  "grammar_fixes": ["string"]\n}\nRules:\n- tips length: 2 to ${tipCount}\n- each tip concise and actionable\n- grammar_fixes can be empty array`;
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "title": "string",\n  "final_text": "string",\n  "tips": ["string"],\n  "grammar_fixes": ["string"]\n}\nRules:\n- title must be 1 to 3 words, high-signal, and reflect the core session topic\n- do not use quotes or punctuation-only titles\n- tips length: 2 to ${tipCount}\n- each tip concise and actionable\n- grammar_fixes can be empty array`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -213,6 +216,7 @@ async function rewriteAndCoach({ mode, transcript }) {
     throw new Error("Could not parse rewrite JSON from model response.");
   }
 
+  const title = sanitizeSessionTitle(typeof parsed.title === "string" ? parsed.title : "", transcript);
   const finalText = typeof parsed.final_text === "string" ? parsed.final_text.trim() : "";
   const tips = Array.isArray(parsed.tips) ? parsed.tips.filter((t) => typeof t === "string" && t.trim()).map((t) => t.trim()) : [];
   const grammarFixes = Array.isArray(parsed.grammar_fixes)
@@ -224,10 +228,34 @@ async function rewriteAndCoach({ mode, transcript }) {
   }
 
   return {
+    title,
     final_text: finalText,
     tips,
     grammar_fixes: grammarFixes
   };
+}
+
+function sanitizeSessionTitle(rawTitle, transcriptFallback) {
+  const normalized = String(rawTitle || "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s']/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const words = normalized.split(" ").filter(Boolean).slice(0, 3);
+  if (words.length > 0) {
+    return words.join(" ");
+  }
+
+  const fallbackWords = String(transcriptFallback || "")
+    .replace(/[^\p{L}\p{N}\s']/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 3);
+
+  return fallbackWords.length > 0 ? fallbackWords.join(" ") : "Untitled Session";
 }
 
 async function fetchOpenAICreditSummary() {
@@ -331,6 +359,100 @@ async function fetchOpenAIMonthlyUsageSummary() {
   };
 }
 
+async function createOpenAIRealtimeSessionBootstrap() {
+  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      session: {
+        type: "realtime",
+        model: OPENAI_REALTIME_MODEL,
+        instructions: "You are an English speaking coach helping users communicate naturally and clearly."
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI realtime client secret bootstrap failed (${response.status}): ${text}`);
+  }
+
+  const payload = await response.json();
+  const clientSecret = payload?.client_secret?.value;
+  const sessionID = payload?.id ?? payload?.session?.id;
+  const model = payload?.session?.model || OPENAI_REALTIME_MODEL;
+  const expiresAtRaw = payload?.client_secret?.expires_at;
+
+  if (!clientSecret || !sessionID) {
+    throw new Error("OpenAI realtime payload missing required fields.");
+  }
+
+  let expiresAt = null;
+  if (Number.isFinite(Number(expiresAtRaw))) {
+    expiresAt = new Date(Number(expiresAtRaw) * 1000).toISOString();
+  }
+
+  return {
+    session_id: sessionID,
+    model,
+    client_secret: clientSecret,
+    expires_at: expiresAt
+  };
+}
+
+async function generateRealtimeChatReply({ text, conversation }) {
+  const history = Array.isArray(conversation)
+    ? conversation
+        .filter((item) => item && typeof item.role === "string" && typeof item.text === "string")
+        .map((item) => ({
+          role: item.role === "assistant" ? "assistant" : "user",
+          content: item.text
+        }))
+    : [];
+
+  const messages = [
+    {
+      role: "system",
+      content:
+        "You are a concise English speaking coach in a realtime conversation tab. Be practical, friendly, and keep responses short unless asked for detail."
+    },
+    ...history,
+    {
+      role: "user",
+      content: String(text || "")
+    }
+  ];
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.4,
+      messages
+    })
+  });
+
+  if (!response.ok) {
+    const textBody = await response.text();
+    throw new Error(`OpenAI realtime chat fallback failed (${response.status}): ${textBody}`);
+  }
+
+  const payload = await response.json();
+  const reply = payload?.choices?.[0]?.message?.content?.trim();
+  if (!reply) {
+    throw new Error("OpenAI realtime chat fallback returned empty reply.");
+  }
+
+  return reply;
+}
+
 const server = createServer(async (req, res) => {
   if (!req.url || !req.method) {
     return sendJson(res, 400, { error: "Invalid request" });
@@ -381,6 +503,74 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  if (req.method === "GET" && req.url === "/v1/openai-realtime-capabilities") {
+    return sendJson(res, 200, {
+      provider: "openai",
+      mode: "realtime-conversation",
+      transport: "webrtc",
+      configured: Boolean(OPENAI_API_KEY),
+      available: Boolean(OPENAI_API_KEY),
+      model: OPENAI_REALTIME_MODEL,
+      fallback_chat_available: true,
+      message:
+        OPENAI_API_KEY
+          ? "WebRTC-first realtime bootstrap is available. Use direct client WebRTC as primary path."
+          : "OPENAI_API_KEY is missing on backend proxy."
+    });
+  }
+
+  if (req.method === "POST" && req.url === "/v1/openai-realtime/session") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const session = await createOpenAIRealtimeSessionBootstrap();
+      return sendJson(res, 200, session);
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to create realtime session"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/openai-realtime/chat") {
+    return sendJson(res, 410, {
+      error:
+        "Deprecated endpoint. Use direct OpenAI Realtime WebRTC as primary path, or use /v1/openai-realtime/chat-fallback explicitly."
+    });
+  }
+
+  if (req.method === "POST" && req.url === "/v1/openai-realtime/chat-fallback") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const body = await readJsonBody(req);
+      const text = typeof body?.text === "string" ? body.text.trim() : "";
+      const conversation = Array.isArray(body?.conversation) ? body.conversation : [];
+
+      if (!text) {
+        return sendJson(res, 400, { error: "text is required" });
+      }
+
+      const reply = await generateRealtimeChatReply({ text, conversation });
+      return sendJson(res, 200, {
+        reply,
+        mode: "fallback"
+      });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Realtime chat fallback failed"
+      });
+    }
+  }
+
   if (req.method === "POST" && req.url === "/v1/process-audio") {
     const contentType = req.headers["content-type"] || "";
     const boundaryMatch = contentType.match(/boundary=(.+)$/);
@@ -411,6 +601,7 @@ const server = createServer(async (req, res) => {
       const rewritten = await rewriteAndCoach({ mode, transcript });
 
       return sendJson(res, 200, {
+        title: rewritten.title,
         transcript,
         final_text: rewritten.final_text,
         tips: rewritten.tips,

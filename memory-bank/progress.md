@@ -50,6 +50,9 @@ Latest stabilization update: realtime on-device transcript display has been rewo
   - `GET /v1/openai-credit`
   - `GET /v1/openai-usage-month`
   - graceful fallback messaging when account/role/key scope cannot access billing/cost data
+- Realtime chat lifecycle hardening is now implemented in iOS RealtimeChatViewModel:
+  - session bootstrap is refreshed automatically if ephemeral client secret is expired or near expiry before connect/reconnect
+  - dropped realtime WebRTC sessions trigger automatic reconnect with exponential backoff and capped retry attempts
 
 ## What’s Left to Build
 1. Confirm/document canonical iOS source path and clean duplicate folder ambiguity.
@@ -70,3 +73,26 @@ Latest stabilization update: realtime on-device transcript display has been rewo
 
 ## Next Milestone
 Move from validated MVP to durable v1 baseline: canonicalized project structure, persisted history, initial automated tests, and clearer settings diagnostics for billing endpoint restrictions.
+
+## Deferred Roadmap: OpenAI Realtime Full Wiring (Future)
+
+### Now (keep current stable behavior)
+- Keep `OpenAI Realtime Streaming` selectable as preview/scaffold.
+- Keep primary runtime flow as batch processing: record -> `POST /v1/process-audio`.
+- Keep UI messaging explicit that full realtime session wiring is not enabled yet.
+
+### Next (when realtime implementation starts)
+- Backend:
+  - add websocket relay path (planned: `/v1/openai-realtime/ws`)
+  - wire OpenAI realtime session bootstrap + bi-directional event forwarding
+  - upgrade `/v1/openai-realtime-capabilities` from placeholder to runtime truth
+- iOS:
+  - add dedicated realtime streaming service (connect/send audio/receive transcript)
+  - route audio pipeline by transcription method (Apple on-device vs OpenAI realtime)
+  - update ViewModel lifecycle handling for realtime connect/pause/resume/stop
+
+### Later (hardening and polish)
+- Add rewrite-only endpoint (planned: `POST /v1/rewrite-text`) so realtime transcript is not retranscribed.
+- Expand websocket diagnostics and telemetry for realtime failures (reconnect baseline now implemented).
+- Add regression tests ensuring Apple on-device path remains unaffected.
+- Replace preview copy with live connection/capability state UX once realtime is fully wired.

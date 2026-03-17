@@ -20,6 +20,11 @@ Latest reliability pass focused on:
 - Next cleanup pass should confirm and document the canonical source path used for active development.
 
 ## Recent Changes
+- Hardened realtime session lifecycle in `CoachMobileApp/CoachMobileApp 2/Presentation/Home/VoiceSessionViewModel.swift` (`RealtimeChatViewModel`):
+  - pre-connect ephemeral secret freshness guard now refreshes session bootstrap when secret is expired or near expiry
+  - automatic reconnect on dropped realtime WebRTC path with exponential backoff (1s -> 2s -> 4s -> 8s -> 16s, capped retries)
+  - reconnect scheduling is canceled/reset on manual disconnect and on successful reconnect
+  - debug event stream now captures secret refresh and reconnect lifecycle transitions
 - Reworked live transcription contract in active iOS tree (`CoachMobileApp/CoachMobileApp 2`):
   - `AudioRecorderServicing.setLiveTranscriptionHandler` now sends `LiveTranscriptionUpdate { text, isFinal }`
   - `AudioRecorderService` now forwards `SFSpeechRecognizer` finalization state instead of text-only callbacks
