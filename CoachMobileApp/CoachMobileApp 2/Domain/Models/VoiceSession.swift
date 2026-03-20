@@ -4,6 +4,7 @@ struct VoiceSession: Identifiable, Codable {
     let id: UUID
     let createdAt: Date
     let audioPath: String
+    let sessionTitle: String?
     let transcriptText: String
     let finalText: String
     let coachingTips: [String]
@@ -13,6 +14,7 @@ struct VoiceSession: Identifiable, Codable {
         id: UUID = UUID(),
         createdAt: Date = Date(),
         audioPath: String,
+        sessionTitle: String? = nil,
         transcriptText: String,
         finalText: String,
         coachingTips: [String],
@@ -21,6 +23,7 @@ struct VoiceSession: Identifiable, Codable {
         self.id = id
         self.createdAt = createdAt
         self.audioPath = audioPath
+        self.sessionTitle = sessionTitle
         self.transcriptText = transcriptText
         self.finalText = finalText
         self.coachingTips = coachingTips

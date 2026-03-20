@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { WebSocketServer, WebSocket } from "ws";
 
 function loadLocalEnvFile() {
   const envPath = resolve(process.cwd(), ".env");
@@ -31,6 +32,54 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
 const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime";
+
+function parseRequestURL(req) {
+  const host = req.headers.host || `127.0.0.1:${PORT}`;
+  return new URL(req.url || "/", `http://${host}`);
+}
+
+function realtimeModelFromRequest(req) {
+  try {
+    const parsed = parseRequestURL(req);
+    const requested = parsed.searchParams.get("model")?.trim();
+    return requested || OPENAI_REALTIME_MODEL;
+  } catch {
+    return OPENAI_REALTIME_MODEL;
+  }
+}
+
+function openAIRealtimeWSURL(model) {
+  const endpoint = new URL("https://api.openai.com/v1/realtime");
+  endpoint.searchParams.set("model", model || OPENAI_REALTIME_MODEL);
+  endpoint.protocol = "wss:";
+  return endpoint.toString();
+}
+
+function safeJsonParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function enforceTextOnlySessionUpdate(messageText) {
+  const parsed = safeJsonParse(messageText);
+  if (!parsed || typeof parsed !== "object") return messageText;
+
+  if (parsed.type !== "session.update") return messageText;
+
+  const session = parsed.session && typeof parsed.session === "object" ? parsed.session : {};
+  const next = {
+    ...parsed,
+    session: {
+      ...session,
+      modalities: ["text"]
+    }
+  };
+
+  return JSON.stringify(next);
+}
 
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -359,98 +408,32 @@ async function fetchOpenAIMonthlyUsageSummary() {
   };
 }
 
-async function createOpenAIRealtimeSessionBootstrap() {
-  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+async function createRealtimeSession({ model }) {
+  const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${OPENAI_API_KEY}`
     },
     body: JSON.stringify({
-      session: {
-        type: "realtime",
-        model: OPENAI_REALTIME_MODEL,
-        instructions: "You are an English speaking coach helping users communicate naturally and clearly."
+      model: model || OPENAI_REALTIME_MODEL,
+      modalities: ["text"],
+      input_audio_format: "pcm16",
+      input_audio_transcription: {
+        model: OPENAI_TRANSCRIPTION_MODEL
+      },
+      turn_detection: {
+        type: "server_vad"
       }
     })
   });
 
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI realtime client secret bootstrap failed (${response.status}): ${text}`);
+    throw new Error(`OpenAI realtime session failed (${response.status}): ${JSON.stringify(payload)}`);
   }
 
-  const payload = await response.json();
-  const clientSecret = payload?.client_secret?.value;
-  const sessionID = payload?.id ?? payload?.session?.id;
-  const model = payload?.session?.model || OPENAI_REALTIME_MODEL;
-  const expiresAtRaw = payload?.client_secret?.expires_at;
-
-  if (!clientSecret || !sessionID) {
-    throw new Error("OpenAI realtime payload missing required fields.");
-  }
-
-  let expiresAt = null;
-  if (Number.isFinite(Number(expiresAtRaw))) {
-    expiresAt = new Date(Number(expiresAtRaw) * 1000).toISOString();
-  }
-
-  return {
-    session_id: sessionID,
-    model,
-    client_secret: clientSecret,
-    expires_at: expiresAt
-  };
-}
-
-async function generateRealtimeChatReply({ text, conversation }) {
-  const history = Array.isArray(conversation)
-    ? conversation
-        .filter((item) => item && typeof item.role === "string" && typeof item.text === "string")
-        .map((item) => ({
-          role: item.role === "assistant" ? "assistant" : "user",
-          content: item.text
-        }))
-    : [];
-
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You are a concise English speaking coach in a realtime conversation tab. Be practical, friendly, and keep responses short unless asked for detail."
-    },
-    ...history,
-    {
-      role: "user",
-      content: String(text || "")
-    }
-  ];
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: OPENAI_CHAT_MODEL,
-      temperature: 0.4,
-      messages
-    })
-  });
-
-  if (!response.ok) {
-    const textBody = await response.text();
-    throw new Error(`OpenAI realtime chat fallback failed (${response.status}): ${textBody}`);
-  }
-
-  const payload = await response.json();
-  const reply = payload?.choices?.[0]?.message?.content?.trim();
-  if (!reply) {
-    throw new Error("OpenAI realtime chat fallback returned empty reply.");
-  }
-
-  return reply;
+  return payload;
 }
 
 const server = createServer(async (req, res) => {
@@ -503,70 +486,20 @@ const server = createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && req.url === "/v1/openai-realtime-capabilities") {
-    return sendJson(res, 200, {
-      provider: "openai",
-      mode: "realtime-conversation",
-      transport: "webrtc",
-      configured: Boolean(OPENAI_API_KEY),
-      available: Boolean(OPENAI_API_KEY),
-      model: OPENAI_REALTIME_MODEL,
-      fallback_chat_available: true,
-      message:
-        OPENAI_API_KEY
-          ? "WebRTC-first realtime bootstrap is available. Use direct client WebRTC as primary path."
-          : "OPENAI_API_KEY is missing on backend proxy."
-    });
-  }
-
-  if (req.method === "POST" && req.url === "/v1/openai-realtime/session") {
+  if (req.method === "POST" && req.url.startsWith("/v1/openai-realtime/session")) {
     if (!OPENAI_API_KEY) {
       return sendJson(res, 500, {
         error: "OPENAI_API_KEY is not configured on backend proxy"
       });
     }
 
+    const model = realtimeModelFromRequest(req);
     try {
-      const session = await createOpenAIRealtimeSessionBootstrap();
+      const session = await createRealtimeSession({ model });
       return sendJson(res, 200, session);
     } catch (error) {
       return sendJson(res, 500, {
         error: error instanceof Error ? error.message : "Failed to create realtime session"
-      });
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/v1/openai-realtime/chat") {
-    return sendJson(res, 410, {
-      error:
-        "Deprecated endpoint. Use direct OpenAI Realtime WebRTC as primary path, or use /v1/openai-realtime/chat-fallback explicitly."
-    });
-  }
-
-  if (req.method === "POST" && req.url === "/v1/openai-realtime/chat-fallback") {
-    if (!OPENAI_API_KEY) {
-      return sendJson(res, 500, {
-        error: "OPENAI_API_KEY is not configured on backend proxy"
-      });
-    }
-
-    try {
-      const body = await readJsonBody(req);
-      const text = typeof body?.text === "string" ? body.text.trim() : "";
-      const conversation = Array.isArray(body?.conversation) ? body.conversation : [];
-
-      if (!text) {
-        return sendJson(res, 400, { error: "text is required" });
-      }
-
-      const reply = await generateRealtimeChatReply({ text, conversation });
-      return sendJson(res, 200, {
-        reply,
-        mode: "fallback"
-      });
-    } catch (error) {
-      return sendJson(res, 500, {
-        error: error instanceof Error ? error.message : "Realtime chat fallback failed"
       });
     }
   }
@@ -620,6 +553,114 @@ const server = createServer(async (req, res) => {
   }
 
   return sendJson(res, 404, { error: "Not found" });
+});
+
+const realtimeRelayWSS = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  if (!req.url) {
+    socket.destroy();
+    return;
+  }
+
+  let pathname = "";
+  try {
+    pathname = parseRequestURL(req).pathname;
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  if (pathname !== "/v1/openai-realtime/ws") {
+    socket.destroy();
+    return;
+  }
+
+  if (!OPENAI_API_KEY) {
+    socket.destroy();
+    return;
+  }
+
+  realtimeRelayWSS.handleUpgrade(req, socket, head, (clientSocket) => {
+    realtimeRelayWSS.emit("connection", clientSocket, req);
+  });
+});
+
+realtimeRelayWSS.on("connection", (clientSocket, req) => {
+  const model = realtimeModelFromRequest(req);
+  const upstreamSocket = new WebSocket(openAIRealtimeWSURL(model), {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "OpenAI-Beta": "realtime=v1"
+    }
+  });
+
+  let clientClosed = false;
+  let upstreamClosed = false;
+
+  const closeBoth = (code = 1000, reason = "") => {
+    if (!clientClosed && clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.close(code, reason);
+    }
+    if (!upstreamClosed && upstreamSocket.readyState === WebSocket.OPEN) {
+      upstreamSocket.close(code, reason);
+    }
+  };
+
+  upstreamSocket.on("open", () => {
+    if (clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.send(JSON.stringify({ type: "relay.ready", model }));
+    }
+  });
+
+  clientSocket.on("message", (data, isBinary) => {
+    if (upstreamSocket.readyState !== WebSocket.OPEN) return;
+
+    if (isBinary) {
+      upstreamSocket.send(data, { binary: true });
+      return;
+    }
+
+    const text = typeof data === "string" ? data : data.toString("utf8");
+    const normalized = enforceTextOnlySessionUpdate(text);
+    upstreamSocket.send(normalized);
+  });
+
+  upstreamSocket.on("message", (data, isBinary) => {
+    if (clientSocket.readyState !== WebSocket.OPEN) return;
+    clientSocket.send(data, { binary: isBinary });
+  });
+
+  clientSocket.on("close", () => {
+    clientClosed = true;
+    if (!upstreamClosed && upstreamSocket.readyState === WebSocket.OPEN) {
+      upstreamSocket.close(1000, "Client closed");
+    }
+  });
+
+  upstreamSocket.on("close", (code, reason) => {
+    upstreamClosed = true;
+    if (!clientClosed && clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.close(code || 1000, reason?.toString() || "Upstream closed");
+    }
+  });
+
+  clientSocket.on("error", () => {
+    closeBoth(1011, "Client socket error");
+  });
+
+  upstreamSocket.on("error", (error) => {
+    if (clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.send(
+        JSON.stringify({
+          type: "relay.error",
+          message: error instanceof Error ? error.message : "Upstream realtime error"
+        })
+      );
+    }
+
+    closeBoth(1011, "Upstream socket error");
+  });
 });
 
 server.listen(PORT, () => {

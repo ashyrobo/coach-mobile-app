@@ -12,45 +12,52 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var isRecording = false
     @Published var isPaused = false
     @Published var recordingTime: TimeInterval = 0
-    @Published var liveTranscript: String = ""
-    @Published var isOnDeviceTranscriptionAvailable = false
-    @Published var openAICreditDisplay: String = "Not loaded"
-    @Published var openAIMonthlyUsageDisplay: String = "Not loaded"
-    @Published var isLoadingCredit = false
-    @Published var isLoadingUsage = false
+    @Published var transcriptionMethod: TranscriptionMethod = AppConfig.transcriptionMethod {
+        didSet {
+            AppConfig.setTranscriptionMethod(transcriptionMethod)
+            applyTranscriptionMethodSelection()
+        }
+    }
     @Published var selectedMode: RewriteMode = .summarize
     @Published var statusMessage: String = "Ready to record"
     @Published var transcript: String = ""
     @Published var finalText: String = ""
     @Published var tips: [String] = []
     @Published var latestAudioURL: URL?
+    @Published var lastProcessedMode: RewriteMode?
+    @Published var realtimeStatusMessage: String = "Realtime idle"
+    @Published var realtimeLiveText: String = ""
+    @Published var isRealtimeRunning: Bool = false
 
     let historyStore: SessionHistoryStore
+    let vocabularyStore: VocabularyStore
 
     private let permissionService: PermissionServicing
     private let audioRecorderService: AudioRecorderServicing
     private let processVoiceSessionUseCase: ProcessVoiceSessionUseCase
+    private let realtimeStreamingService = OpenAIRealtimeStreamingService()
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
-    private var finalizedLiveTranscript: String = ""
-    private var currentPartialLiveTranscript: String = ""
 
     init(
         historyStore: SessionHistoryStore,
+        vocabularyStore: VocabularyStore,
         permissionService: PermissionServicing,
         audioRecorderService: AudioRecorderServicing,
         voiceProcessingService: VoiceProcessingServicing
     ) {
         self.historyStore = historyStore
+        self.vocabularyStore = vocabularyStore
         self.permissionService = permissionService
         self.audioRecorderService = audioRecorderService
         self.processVoiceSessionUseCase = ProcessVoiceSessionUseCase(voiceProcessingService: voiceProcessingService)
-        configureLiveTranscription()
+        applyTranscriptionMethodSelection()
     }
 
     convenience init() {
         self.init(
             historyStore: SessionHistoryStore(),
+            vocabularyStore: VocabularyStore(),
             permissionService: PermissionService(),
             audioRecorderService: AudioRecorderService(),
             voiceProcessingService: VoiceProcessingAPIService()
@@ -65,9 +72,6 @@ final class VoiceSessionViewModel: ObservableObject {
 
             latestAudioURL = nil
             recordingTime = 0
-            liveTranscript = ""
-            finalizedLiveTranscript = ""
-            currentPartialLiveTranscript = ""
             transcript = ""
             finalText = ""
             tips = []
@@ -86,7 +90,6 @@ final class VoiceSessionViewModel: ObservableObject {
         do {
             guard recordingState == .recording else { return }
             try await audioRecorderService.pauseRecording()
-            finalizeCurrentPartialSegmentIfNeeded()
 
             recordingState = .paused
             isPaused = true
@@ -117,13 +120,7 @@ final class VoiceSessionViewModel: ObservableObject {
         do {
             guard recordingState != .idle else { return }
             latestAudioURL = try await audioRecorderService.stopRecording()
-            finalizeCurrentPartialSegmentIfNeeded()
             recordingTime = audioRecorderService.currentRecordingTime()
-            if !finalizedLiveTranscript.isEmpty {
-                transcript = finalizedLiveTranscript
-            } else if !liveTranscript.isEmpty {
-                transcript = liveTranscript
-            }
             statusMessage = "Recording stopped. Ready to process."
         } catch {
             statusMessage = error.localizedDescription
@@ -156,6 +153,7 @@ final class VoiceSessionViewModel: ObservableObject {
             let savedAudioURL = try historyStore.persistRecording(from: audioURL)
             let session = VoiceSession(
                 audioPath: savedAudioURL.path,
+                sessionTitle: result.title?.trimmingCharacters(in: .whitespacesAndNewlines),
                 transcriptText: result.transcript,
                 finalText: result.finalText,
                 coachingTips: result.tips,
@@ -167,67 +165,46 @@ final class VoiceSessionViewModel: ObservableObject {
             finalText = result.finalText
             tips = result.tips
             latestAudioURL = savedAudioURL
+            lastProcessedMode = selectedMode
             statusMessage = "Done"
         } catch {
             statusMessage = error.localizedDescription
         }
     }
 
-    func refreshOpenAICredit() async {
-        isLoadingCredit = true
-        defer { isLoadingCredit = false }
+    @discardableResult
+    func addVocabularyFromWordImprovement(_ phrase: String) -> VocabularyStore.ManualAddOutcome {
+        let trimmedPhrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPhrase.isEmpty else { return .invalid }
 
-        let endpoint = AppConfig.voiceProcessingBaseURL
-            .appendingPathComponent("v1")
-            .appendingPathComponent("openai-credit")
+        let correctedSentence = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !correctedSentence.isEmpty else { return .invalid }
 
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "GET"
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                openAICreditDisplay = "Unavailable"
-                return
-            }
-
-            let payload = try JSONDecoder().decode(OpenAICreditPayload.self, from: data)
-            if let remainingUSD = payload.remainingUSD {
-                openAICreditDisplay = String(format: "$%.2f remaining", remainingUSD)
-            } else {
-                openAICreditDisplay = payload.message ?? "Unavailable"
-            }
-        } catch {
-            openAICreditDisplay = "Unavailable"
-        }
-    }
-
-    func refreshOpenAIMonthlyUsage() async {
-        isLoadingUsage = true
-        defer { isLoadingUsage = false }
-
-        let endpoint = AppConfig.voiceProcessingBaseURL
-            .appendingPathComponent("v1")
-            .appendingPathComponent("openai-usage-month")
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "GET"
+        let spokenSentence = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceSentence = spokenSentence.isEmpty ? correctedSentence : spokenSentence
+        let mode = lastProcessedMode ?? selectedMode
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                openAIMonthlyUsageDisplay = "Unavailable"
-                return
+            let outcome = try vocabularyStore.addManualVocabulary(
+                phrase: trimmedPhrase,
+                spokenSentence: sourceSentence,
+                correctedSentence: correctedSentence,
+                mode: mode
+            )
+
+            switch outcome {
+            case .added:
+                statusMessage = "Added to vocabulary"
+            case .alreadyExists:
+                statusMessage = "Already in vocabulary"
+            case .invalid:
+                statusMessage = "Unable to add vocabulary"
             }
 
-            let payload = try JSONDecoder().decode(OpenAIMonthlyUsagePayload.self, from: data)
-            if let monthToDateUSD = payload.monthToDateUSD {
-                openAIMonthlyUsageDisplay = String(format: "$%.2f this month", monthToDateUSD)
-            } else {
-                openAIMonthlyUsageDisplay = payload.message ?? "Unavailable"
-            }
+            return outcome
         } catch {
-            openAIMonthlyUsageDisplay = "Unavailable"
+            statusMessage = "Unable to save vocabulary right now"
+            return .invalid
         }
     }
 
@@ -261,142 +238,46 @@ final class VoiceSessionViewModel: ObservableObject {
         stopRecordingTimer()
     }
 
-    private func configureLiveTranscription() {
-        audioRecorderService.setLiveTranscriptionHandler { [weak self] update in
-            guard let self else { return }
-            let incomingText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func applyTranscriptionMethodSelection() {
+        _ = transcriptionMethod
+    }
 
-            if update.isFinal {
-                self.finalizedLiveTranscript = self.mergeTranscript(
-                    self.finalizedLiveTranscript,
-                    with: incomingText
-                )
-                self.currentPartialLiveTranscript = ""
-            } else {
-                let previousPartial = self.currentPartialLiveTranscript
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+    func startRealtimeStreaming() async {
+        do {
+            try await requestRequiredPermissions()
+            realtimeLiveText = ""
+            realtimeStatusMessage = "Connecting to realtime..."
 
-                // Speech framework may re-segment after long pauses and emit a fresh partial
-                // that doesn't include prior words. Promote the previous partial first so text
-                // doesn't visually disappear.
-                if !previousPartial.isEmpty,
-                   !incomingText.isEmpty,
-                   !incomingText.hasPrefix(previousPartial),
-                   !previousPartial.hasPrefix(incomingText) {
-                    self.finalizedLiveTranscript = self.mergeTranscript(
-                        self.finalizedLiveTranscript,
-                        with: previousPartial
-                    )
-                }
+            try await realtimeStreamingService.start { [weak self] event in
+                Task { @MainActor in
+                    guard let self else { return }
 
-                // Ignore empty partial updates so previously shown content remains visible.
-                if !incomingText.isEmpty {
-                    self.currentPartialLiveTranscript = incomingText
+                    switch event {
+                    case let .textDelta(chunk):
+                        self.realtimeLiveText += chunk
+                    case let .status(message):
+                        self.realtimeStatusMessage = message
+                    case let .error(message):
+                        self.realtimeStatusMessage = message
+                    }
                 }
             }
 
-            self.liveTranscript = self.composeLiveTranscript()
-        }
-
-        audioRecorderService.setLiveTranscriptionAvailabilityHandler { [weak self] isAvailable in
-            self?.isOnDeviceTranscriptionAvailable = isAvailable
+            isRealtimeRunning = true
+            realtimeStatusMessage = "Realtime streaming"
+        } catch {
+            isRealtimeRunning = false
+            realtimeStatusMessage = error.localizedDescription
         }
     }
 
-    private func composeLiveTranscript() -> String {
-        [
-            finalizedLiveTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
-            currentPartialLiveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        ]
-        .filter { !$0.isEmpty }
-        .joined(separator: " ")
+    func stopRealtimeStreaming() {
+        realtimeStreamingService.stop()
+        isRealtimeRunning = false
+        if realtimeStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            realtimeStatusMessage = "Realtime stopped"
+        }
     }
-
-    private func mergeTranscript(_ existing: String, with incoming: String) -> String {
-        let cleanExisting = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanIncoming = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !cleanIncoming.isEmpty else { return cleanExisting }
-        guard !cleanExisting.isEmpty else { return cleanIncoming }
-
-        let canonicalExisting = canonicalizedForComparison(cleanExisting)
-        let canonicalIncoming = canonicalizedForComparison(cleanIncoming)
-
-        if canonicalExisting == canonicalIncoming {
-            return cleanExisting
-        }
-
-        if canonicalExisting.contains(canonicalIncoming) {
-            return cleanExisting
-        }
-
-        if canonicalIncoming.contains(canonicalExisting) {
-            return cleanIncoming
-        }
-
-        if cleanIncoming.hasPrefix(cleanExisting) {
-            return cleanIncoming
-        }
-
-        if cleanExisting.hasSuffix(cleanIncoming) {
-            return cleanExisting
-        }
-
-        let overlap = overlapLengthBetweenSuffixAndPrefix(existing: cleanExisting, incoming: cleanIncoming)
-        if overlap > 0 {
-            let remainder = String(cleanIncoming.dropFirst(overlap))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if remainder.isEmpty {
-                return cleanExisting
-            }
-
-            return "\(cleanExisting) \(remainder)"
-        }
-
-        return "\(cleanExisting) \(cleanIncoming)"
-    }
-
-    private func canonicalizedForComparison(_ text: String) -> String {
-        text
-            .lowercased()
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func overlapLengthBetweenSuffixAndPrefix(existing: String, incoming: String) -> Int {
-        let maxOverlap = min(existing.count, incoming.count)
-        guard maxOverlap > 0 else { return 0 }
-
-        for length in stride(from: maxOverlap, through: 1, by: -1) {
-            let suffix = String(existing.suffix(length)).lowercased()
-            let prefix = String(incoming.prefix(length)).lowercased()
-            if suffix == prefix {
-                return length
-            }
-        }
-
-        return 0
-    }
-
-    private func finalizeCurrentPartialSegmentIfNeeded() {
-        let partial = currentPartialLiveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !partial.isEmpty else { return }
-
-        finalizedLiveTranscript = mergeTranscript(finalizedLiveTranscript, with: partial)
-        currentPartialLiveTranscript = ""
-        liveTranscript = composeLiveTranscript()
-    }
-}
-
-private struct OpenAICreditPayload: Decodable {
-    let remainingUSD: Double?
-    let message: String?
-}
-
-private struct OpenAIMonthlyUsagePayload: Decodable {
-    let monthToDateUSD: Double?
-    let message: String?
 }
 
 final class SessionHistoryStore: ObservableObject {
@@ -494,3 +375,255 @@ final class SessionHistoryStore: ObservableObject {
     }
 }
 
+struct VocabularyItem: Identifiable, Codable {
+    let id: UUID
+    let createdAt: Date
+    let sourceSessionID: UUID
+    let phrase: String
+    let tag: String?
+    let meaning: String
+    let spokenSentence: String
+    let correctedSentence: String
+
+    init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        sourceSessionID: UUID,
+        phrase: String,
+        tag: String? = nil,
+        meaning: String,
+        spokenSentence: String,
+        correctedSentence: String
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.sourceSessionID = sourceSessionID
+        self.phrase = phrase
+        self.tag = tag
+        self.meaning = meaning
+        self.spokenSentence = spokenSentence
+        self.correctedSentence = correctedSentence
+    }
+}
+
+final class VocabularyStore: ObservableObject {
+    enum ManualAddOutcome {
+        case added
+        case alreadyExists
+        case invalid
+    }
+
+    @Published private(set) var items: [VocabularyItem] = []
+
+    private let fileManager = FileManager.default
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    private var vocabularyFileURL: URL {
+        documentsDirectory.appendingPathComponent("vocabulary-items.json")
+    }
+
+    private var documentsDirectory: URL {
+        fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    init() {
+        encoder.outputFormatting = [.prettyPrinted]
+        loadItems()
+    }
+
+    func autoSaveVocabulary(from session: VoiceSession) throws {
+        let generatedItems = extractVocabularyItems(from: session)
+        guard !generatedItems.isEmpty else { return }
+
+        for item in generatedItems {
+            let alreadyExists = items.contains {
+                $0.sourceSessionID == item.sourceSessionID &&
+                $0.phrase.caseInsensitiveCompare(item.phrase) == .orderedSame &&
+                $0.correctedSentence.caseInsensitiveCompare(item.correctedSentence) == .orderedSame
+            }
+
+            if !alreadyExists {
+                items.insert(item, at: 0)
+            }
+        }
+
+        items.sort { $0.createdAt > $1.createdAt }
+        try persistItems()
+    }
+
+    func addManualVocabulary(
+        phrase: String,
+        spokenSentence: String,
+        correctedSentence: String,
+        mode: RewriteMode,
+        sourceSessionID: UUID = UUID()
+    ) throws -> ManualAddOutcome {
+        let cleanPhrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCorrectedSentence = correctedSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSpokenSentence = spokenSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanPhrase.isEmpty, !cleanCorrectedSentence.isEmpty else {
+            return .invalid
+        }
+
+        let alreadyExists = items.contains {
+            $0.phrase.caseInsensitiveCompare(cleanPhrase) == .orderedSame
+            && $0.correctedSentence.caseInsensitiveCompare(cleanCorrectedSentence) == .orderedSame
+        }
+
+        if alreadyExists {
+            return .alreadyExists
+        }
+
+        let item = VocabularyItem(
+            sourceSessionID: sourceSessionID,
+            phrase: cleanPhrase,
+            tag: vocabularyTag(for: mode),
+            meaning: "Saved from word improvements.",
+            spokenSentence: cleanSpokenSentence.isEmpty ? cleanCorrectedSentence : cleanSpokenSentence,
+            correctedSentence: cleanCorrectedSentence
+        )
+
+        items.insert(item, at: 0)
+        items.sort { $0.createdAt > $1.createdAt }
+        try persistItems()
+        return .added
+    }
+
+    func deleteItem(id: UUID) {
+        items.removeAll { $0.id == id }
+        do {
+            try persistItems()
+        } catch {
+            print("Failed to persist vocabulary delete: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadItems() {
+        guard fileManager.fileExists(atPath: vocabularyFileURL.path) else {
+            items = []
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: vocabularyFileURL)
+            items = try decoder.decode([VocabularyItem].self, from: data)
+            items.sort { $0.createdAt > $1.createdAt }
+        } catch {
+            items = []
+            print("Failed to load vocabulary items: \(error.localizedDescription)")
+        }
+    }
+
+    private func persistItems() throws {
+        let data = try encoder.encode(items)
+        try data.write(to: vocabularyFileURL, options: .atomic)
+    }
+
+    private func extractVocabularyItems(from session: VoiceSession) -> [VocabularyItem] {
+        let spokenSentences = splitIntoSentences(session.transcriptText)
+        let correctedSentences = splitIntoSentences(session.finalText)
+        let pairCount = max(spokenSentences.count, correctedSentences.count)
+
+        var generated: [VocabularyItem] = []
+        generated.reserveCapacity(max(1, pairCount))
+
+        for index in 0..<pairCount {
+            let spoken = (index < spokenSentences.count ? spokenSentences[index] : session.transcriptText)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let corrected = (index < correctedSentences.count ? correctedSentences[index] : session.finalText)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !corrected.isEmpty else { continue }
+
+            let phrase = candidatePhrase(spoken: spoken, corrected: corrected)
+            guard !phrase.isEmpty else { continue }
+
+            let meaning: String
+            if !spoken.isEmpty {
+                meaning = "More natural way to express your idea from: \"\(truncate(spoken, maxLength: 90))\""
+            } else {
+                meaning = "Useful phrase from your corrected sentence."
+            }
+
+            generated.append(
+                VocabularyItem(
+                    sourceSessionID: session.id,
+                    phrase: phrase,
+                    tag: vocabularyTag(for: session.mode),
+                    meaning: meaning,
+                    spokenSentence: spoken.isEmpty ? session.transcriptText : spoken,
+                    correctedSentence: corrected
+                )
+            )
+        }
+
+        if generated.isEmpty {
+            let fallbackPhrase = candidatePhrase(spoken: session.transcriptText, corrected: session.finalText)
+            if !fallbackPhrase.isEmpty {
+                generated.append(
+                    VocabularyItem(
+                        sourceSessionID: session.id,
+                        phrase: fallbackPhrase,
+                        tag: vocabularyTag(for: session.mode),
+                        meaning: "Useful phrase extracted from your processed session.",
+                        spokenSentence: session.transcriptText,
+                        correctedSentence: session.finalText
+                    )
+                )
+            }
+        }
+
+        return Array(generated.prefix(5))
+    }
+
+    private func splitIntoSentences(_ text: String) -> [String] {
+        text
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(whereSeparator: { [".", "!", "?"].contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func candidatePhrase(spoken: String, corrected: String) -> String {
+        let cleanCorrected = corrected.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCorrected.isEmpty else { return "" }
+
+        let spokenWords = Set(tokenize(spoken).map { $0.lowercased() })
+        let correctedWords = tokenize(cleanCorrected)
+
+        let newWords = correctedWords.filter { !spokenWords.contains($0.lowercased()) }
+        if !newWords.isEmpty {
+            return newWords.prefix(4).joined(separator: " ")
+        }
+
+        if cleanCorrected.caseInsensitiveCompare(spoken.trimmingCharacters(in: .whitespacesAndNewlines)) != .orderedSame {
+            return correctedWords.prefix(4).joined(separator: " ")
+        }
+
+        return ""
+    }
+
+    private func tokenize(_ text: String) -> [String] {
+        text
+            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "'")).inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func truncate(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        let prefix = text.prefix(maxLength)
+        return "\(prefix)…"
+    }
+
+    private func vocabularyTag(for mode: RewriteMode) -> String {
+        switch mode {
+        case .summarize:
+            return "Summary"
+        case .rewordBetter:
+            return "Fluency"
+        }
+    }
+}

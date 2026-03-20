@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import Combine
+import UIKit
 
 struct HomeView: View {
     @StateObject var viewModel: VoiceSessionViewModel
@@ -10,6 +11,16 @@ struct HomeView: View {
             RecordView(viewModel: viewModel)
                 .tabItem {
                     Label("Record", systemImage: "mic.fill")
+                }
+
+            RealtimeView(viewModel: viewModel)
+                .tabItem {
+                    Label("Realtime", systemImage: "waveform.and.mic")
+                }
+
+            VocabularyView(vocabularyStore: viewModel.vocabularyStore)
+                .tabItem {
+                    Label("Vocabulary", systemImage: "text.book.closed.fill")
                 }
 
             HistoryView(historyStore: viewModel.historyStore)
@@ -22,6 +33,211 @@ struct HomeView: View {
                 Label("Settings", systemImage: "gearshape.fill")
             }
         }
+    }
+}
+
+private struct RealtimeView: View {
+    @ObservedObject var viewModel: VoiceSessionViewModel
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Speech in → Realtime API → Live text out")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Text("Model: \(AppConfig.openAIRealtimeModel)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(viewModel.realtimeStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await viewModel.startRealtimeStreaming() }
+                    } label: {
+                        Label("Start", systemImage: "play.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isRealtimeRunning)
+
+                    Button {
+                        viewModel.stopRealtimeStreaming()
+                    } label: {
+                        Label("Stop", systemImage: "stop.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.isRealtimeRunning)
+                }
+
+                ScrollView {
+                    Text(viewModel.realtimeLiveText.isEmpty ? "Live transcript will appear here..." : viewModel.realtimeLiveText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding()
+            .navigationTitle("Realtime")
+            .onDisappear {
+                if viewModel.isRealtimeRunning {
+                    viewModel.stopRealtimeStreaming()
+                }
+            }
+        }
+    }
+}
+
+private struct VocabularyView: View {
+    @ObservedObject var vocabularyStore: VocabularyStore
+    @State private var searchText: String = ""
+
+    private var filteredItems: [VocabularyItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return vocabularyStore.items }
+
+        return vocabularyStore.items.filter { item in
+            item.phrase.localizedCaseInsensitiveContains(query)
+            || item.meaning.localizedCaseInsensitiveContains(query)
+            || item.spokenSentence.localizedCaseInsensitiveContains(query)
+            || item.correctedSentence.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var wordItems: [VocabularyItem] {
+        filteredItems.filter { vocabularyCategory(for: $0.phrase) == .word }
+    }
+
+    private var phraseItems: [VocabularyItem] {
+        filteredItems.filter { vocabularyCategory(for: $0.phrase) == .phrase }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if filteredItems.isEmpty {
+                    ContentUnavailableView(
+                        searchText.isEmpty ? "No Vocabulary Yet" : "No Matches",
+                        systemImage: "text.book.closed",
+                        description: Text(
+                            searchText.isEmpty
+                            ? "Add words or phrases from Word Improvements and they will show up here."
+                            : "Try another search term."
+                        )
+                    )
+                } else {
+                    List {
+                        if !wordItems.isEmpty {
+                            Section("Words") {
+                                ForEach(wordItems) { item in
+                                    vocabularyRow(for: item)
+                                }
+                                .onDelete { offsets in
+                                    deleteItems(in: wordItems, at: offsets)
+                                }
+                            }
+                        }
+
+                        if !phraseItems.isEmpty {
+                            Section("Phrases") {
+                                ForEach(phraseItems) { item in
+                                    vocabularyRow(for: item)
+                                }
+                                .onDelete { offsets in
+                                    deleteItems(in: phraseItems, at: offsets)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Vocabulary")
+            .searchable(text: $searchText, prompt: "Search words or phrases")
+        }
+    }
+
+    @ViewBuilder
+    private func vocabularyRow(for item: VocabularyItem) -> some View {
+        NavigationLink {
+            VocabularyDetailView(item: item)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(item.phrase)
+                        .font(.headline)
+                    Spacer()
+                }
+
+                if let tag = item.tag, !tag.isEmpty {
+                    Text(tag)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func deleteItems(in sourceItems: [VocabularyItem], at offsets: IndexSet) {
+        for offset in offsets {
+            guard sourceItems.indices.contains(offset) else { continue }
+            vocabularyStore.deleteItem(id: sourceItems[offset].id)
+        }
+    }
+
+    private func vocabularyCategory(for phrase: String) -> VocabularyCategory {
+        let tokens = phrase
+            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "'")).inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return tokens.count <= 1 ? .word : .phrase
+    }
+
+    private enum VocabularyCategory {
+        case word
+        case phrase
+    }
+}
+
+private struct VocabularyDetailView: View {
+    let item: VocabularyItem
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(item.phrase)
+                    .font(.title3.weight(.semibold))
+
+                Group {
+                    Text("Your Spoken Sentence")
+                        .font(.headline)
+                    Text(item.spokenSentence)
+                }
+
+                Group {
+                    Text("Corrected Sentence")
+                        .font(.headline)
+                    Text(item.correctedSentence)
+                }
+
+                Text("Saved on \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+        }
+        .navigationTitle("Vocabulary Item")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -46,7 +262,7 @@ private struct HistoryView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack {
-                                        Text(session.mode.displayTitle)
+                                        Text(threeWordTitle(for: session))
                                             .font(.subheadline.weight(.semibold))
                                         Spacer()
                                         Text(session.createdAt, style: .date)
@@ -54,9 +270,9 @@ private struct HistoryView: View {
                                             .foregroundStyle(.secondary)
                                     }
 
-                                    Text(session.transcriptText)
-                                        .lineLimit(2)
-                                        .font(.subheadline)
+                                    Text(session.mode.displayTitle)
+                                        .lineLimit(1)
+                                        .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 4)
@@ -70,7 +286,6 @@ private struct HistoryView: View {
                     }
                 }
             }
-            .navigationTitle("History")
             .confirmationDialog("Delete this session?", item: $sessionToDelete) { session in
                 Button("Delete", role: .destructive) {
                     historyStore.deleteSessionSafely(session)
@@ -80,6 +295,28 @@ private struct HistoryView: View {
                 Text("This removes the saved transcript, final text, tips, and audio recording.")
             }
         }
+    }
+
+    private func threeWordTitle(for session: VoiceSession) -> String {
+        if let aiTitle = session.sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !aiTitle.isEmpty {
+            return aiTitle
+        }
+
+        let sourceText = !session.finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? session.finalText
+            : session.transcriptText
+
+        let words = sourceText
+            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "'")).inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !words.isEmpty else {
+            return "Untitled Session"
+        }
+
+        return words.prefix(3).joined(separator: " ").capitalized
     }
 }
 
@@ -125,12 +362,14 @@ private struct HistoryDetailView: View {
                     Text(session.finalText)
                 }
 
-                if !session.coachingTips.isEmpty {
-                    Text("Coaching Tips")
-                        .font(.headline)
-                    ForEach(session.coachingTips, id: \.self) { tip in
-                        Text("• \(tip)")
-                    }
+                if !session.transcriptText.isEmpty,
+                   !session.finalText.isEmpty,
+                   session.mode == .rewordBetter,
+                   session.transcriptText != session.finalText {
+                    WordDiffHighlightView(
+                        originalText: session.transcriptText,
+                        improvedText: session.finalText
+                    )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -208,12 +447,9 @@ private struct RecordView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
 
-                    if !viewModel.isOnDeviceTranscriptionAvailable {
-                        Label("On-device live transcription is currently unavailable for this locale/device state.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                            .multilineTextAlignment(.center)
-                    }
+                    Text("Transcription Method: \(viewModel.transcriptionMethod.displayTitle)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     if viewModel.isRecording || viewModel.isPaused || viewModel.recordingTime > 0 {
                         Label(
@@ -268,21 +504,6 @@ private struct RecordView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.latestAudioURL == nil || viewModel.isRecording || viewModel.isPaused)
 
-                    if viewModel.isRecording || viewModel.isPaused || !viewModel.liveTranscript.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Live Transcript")
-                                .font(.headline)
-
-                            if viewModel.liveTranscript.isEmpty {
-                                Text("Listening…")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text(viewModel.liveTranscript)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
                     if !viewModel.transcript.isEmpty || !viewModel.finalText.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             if !viewModel.transcript.isEmpty {
@@ -297,13 +518,19 @@ private struct RecordView: View {
                                 Text(viewModel.finalText)
                             }
 
-                            if !viewModel.tips.isEmpty {
-                                Text("Coaching Tips")
-                                    .font(.headline)
-                                ForEach(viewModel.tips, id: \.self) { tip in
-                                    Text("• \(tip)")
-                                }
+                            if !viewModel.transcript.isEmpty,
+                               !viewModel.finalText.isEmpty,
+                               viewModel.lastProcessedMode == .rewordBetter,
+                               viewModel.transcript != viewModel.finalText {
+                                WordDiffHighlightView(
+                                    originalText: viewModel.transcript,
+                                    improvedText: viewModel.finalText,
+                                    onAddToVocabulary: { phrase in
+                                        viewModel.addVocabularyFromWordImprovement(phrase)
+                                    }
+                                )
                             }
+
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -330,70 +557,215 @@ private struct SettingsView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("OpenAI Credit")
+                Text("Transcription Method")
                     .font(.headline)
 
-                Text(viewModel.openAICreditDisplay)
-                    .font(.title3.weight(.semibold))
-
-                Button {
-                    Task { await viewModel.refreshOpenAICredit() }
-                } label: {
-                    if viewModel.isLoadingCredit {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Label("Refresh Credit", systemImage: "arrow.clockwise")
-                            .frame(maxWidth: .infinity)
+                Picker("Transcription Method", selection: $viewModel.transcriptionMethod) {
+                    ForEach(TranscriptionMethod.allCases) { method in
+                        Text(method.displayTitle).tag(method)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-
-                Divider()
-
-                Text("OpenAI Usage (Month to Date)")
-                    .font(.headline)
-
-                Text(viewModel.openAIMonthlyUsageDisplay)
-                    .font(.title3.weight(.semibold))
-
-                Button {
-                    Task { await viewModel.refreshOpenAIMonthlyUsage() }
-                } label: {
-                    if viewModel.isLoadingUsage {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Label("Refresh Usage", systemImage: "chart.bar.xaxis")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(.bordered)
+                .pickerStyle(.menu)
 
                 Link(destination: billingURL) {
                     Label("Open Billing Dashboard", systemImage: "safari")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-
-                Text("Note: API billing/usage endpoints may be restricted by OpenAI account type, org role, or key scope.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.borderedProminent)
 
                 Spacer()
             }
             .padding()
             .navigationTitle("Settings")
-            .task {
-                if viewModel.openAICreditDisplay == "Not loaded" {
-                    await viewModel.refreshOpenAICredit()
+        }
+    }
+}
+
+private struct WordDiffHighlightView: View {
+    let originalText: String
+    let improvedText: String
+    var onAddToVocabulary: ((String) -> VocabularyStore.ManualAddOutcome)? = nil
+
+    @State private var lastAddedPhrase: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Word Improvements")
+                .font(.headline)
+
+            highlightedDiffText
+                .font(.subheadline)
+
+            if let onAddToVocabulary, !manualVocabularyCandidates.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Add to Vocabulary")
+                        .font(.subheadline.weight(.semibold))
+
+                    ForEach(manualVocabularyCandidates, id: \.self) { phrase in
+                        Button {
+                            let outcome = onAddToVocabulary(phrase)
+                            if outcome == .added {
+                                lastAddedPhrase = phrase
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: lastAddedPhrase == phrase ? "checkmark.circle.fill" : "plus.circle.fill")
+                                    .foregroundStyle(lastAddedPhrase == phrase ? .green : .blue)
+                                Text(phrase)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                if viewModel.openAIMonthlyUsageDisplay == "Not loaded" {
-                    await viewModel.refreshOpenAIMonthlyUsage()
+            }
+
+            HStack(spacing: 12) {
+                Label("Original/Replaced", systemImage: "minus.circle.fill")
+                    .foregroundStyle(.red)
+                Label("Better Alternative", systemImage: "plus.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            .font(.caption)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var highlightedDiffText: Text {
+        let segments = diffSegments(original: originalText, improved: improvedText)
+
+        return segments.enumerated().reduce(Text("")) { partial, element in
+            let (index, segment) = element
+            let prefix = index == 0 ? "" : " "
+
+            var piece = Text(prefix + segment.text)
+            switch segment.kind {
+            case .unchanged:
+                piece = piece.foregroundColor(.primary)
+            case .removed:
+                piece = piece
+                    .foregroundColor(.red)
+                    .strikethrough(true, color: .red)
+            case .added:
+                piece = piece.foregroundColor(.green)
+            }
+
+            return partial + piece
+        }
+    }
+
+    private var manualVocabularyCandidates: [String] {
+        let addedSegments = diffSegments(original: originalText, improved: improvedText)
+            .filter { $0.kind == .added }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var seen: Set<String> = []
+        var orderedUnique: [String] = []
+
+        for phrase in addedSegments {
+            let key = phrase.lowercased()
+            if seen.insert(key).inserted {
+                orderedUnique.append(phrase)
+            }
+        }
+
+        return orderedUnique
+    }
+
+    private func diffSegments(original: String, improved: String) -> [DiffSegment] {
+        let originalWords = tokenize(original)
+        let improvedWords = tokenize(improved)
+
+        let n = originalWords.count
+        let m = improvedWords.count
+
+        guard n > 0 || m > 0 else { return [] }
+
+        var lcs = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+
+        if n > 0, m > 0 {
+            for i in 1...n {
+                for j in 1...m {
+                    if originalWords[i - 1].caseInsensitiveCompare(improvedWords[j - 1]) == .orderedSame {
+                        lcs[i][j] = lcs[i - 1][j - 1] + 1
+                    } else {
+                        lcs[i][j] = max(lcs[i - 1][j], lcs[i][j - 1])
+                    }
                 }
             }
         }
+
+        var i = n
+        var j = m
+        var rawSegments: [DiffSegment] = []
+
+        while i > 0 && j > 0 {
+            if originalWords[i - 1].caseInsensitiveCompare(improvedWords[j - 1]) == .orderedSame {
+                rawSegments.append(.init(text: improvedWords[j - 1], kind: .unchanged))
+                i -= 1
+                j -= 1
+            } else if lcs[i - 1][j] >= lcs[i][j - 1] {
+                rawSegments.append(.init(text: originalWords[i - 1], kind: .removed))
+                i -= 1
+            } else {
+                rawSegments.append(.init(text: improvedWords[j - 1], kind: .added))
+                j -= 1
+            }
+        }
+
+        while i > 0 {
+            rawSegments.append(.init(text: originalWords[i - 1], kind: .removed))
+            i -= 1
+        }
+
+        while j > 0 {
+            rawSegments.append(.init(text: improvedWords[j - 1], kind: .added))
+            j -= 1
+        }
+
+        let orderedSegments = rawSegments.reversed()
+        return mergeConsecutiveSegments(Array(orderedSegments))
     }
+
+    private func tokenize(_ text: String) -> [String] {
+        text
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map(String.init)
+    }
+
+    private func mergeConsecutiveSegments(_ segments: [DiffSegment]) -> [DiffSegment] {
+        guard !segments.isEmpty else { return [] }
+
+        var merged: [DiffSegment] = []
+        merged.reserveCapacity(segments.count)
+
+        for segment in segments {
+            guard !segment.text.isEmpty else { continue }
+
+            if var last = merged.last, last.kind == segment.kind {
+                last.text += " \(segment.text)"
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(segment)
+            }
+        }
+
+        return merged
+    }
+}
+
+private struct DiffSegment {
+    var text: String
+    let kind: DiffKind
+}
+
+private enum DiffKind {
+    case unchanged
+    case removed
+    case added
 }
 
 private extension View {

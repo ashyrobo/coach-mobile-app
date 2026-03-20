@@ -1,2 +1,4 @@
 backend-proxy/.env
+backend-proxy/node_modules/
 .DS_Store
+*.xcuserstate
