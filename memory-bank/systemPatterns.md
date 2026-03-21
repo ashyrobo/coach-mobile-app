@@ -11,6 +11,9 @@ This structure supports fast MVP delivery while keeping logic testable and scala
 ## Core Pipeline Pattern
 `Record Audio -> Transcribe -> Rewrite by Mode -> Generate Coaching Tips -> Render + Save`
 
+Additional realtime pipeline (implemented):
+`Mic (AVAudioEngine) -> backend relay WS -> OpenAI Realtime (gpt-realtime) -> streamed text deltas -> Realtime tab UI`
+
 ### Components
 - `AudioRecorderService` (AVFoundation)
   - supports start/pause/resume/stop and exposes current recording time for live UI timers
@@ -21,6 +24,11 @@ This structure supports fast MVP delivery while keeping logic testable and scala
 - `RewriteAndCoachingService` (OpenAI chat/completions with JSON schema output)
 - `SessionRepository` (SwiftData for local history)
 - `Settings/Billing Observability` (proxy-backed OpenAI credit + usage checks with graceful fallback)
+- `OpenAIRealtimeStreamingService` (iOS realtime mic streaming + text delta receive)
+- `Realtime relay (backend-proxy)`
+  - `POST /v1/openai-realtime/session`
+  - `WS /v1/openai-realtime/ws`
+  - forwards realtime events between iOS and OpenAI and enforces text modality on session updates
 
 ## Key Design Decisions
 1. **Hybrid STT strategy**: prefer on-device first, cloud fallback for quality/reliability.
@@ -75,3 +83,9 @@ Additional settings observability endpoints (best-effort):
 - `GET /v1/openai-usage-month` → `{ monthToDateUSD: number|null, message: string|null }`
 
 These are intentionally resilient to account/role limitations and should return user-facing fallback messages when OpenAI billing/cost APIs are unavailable.
+
+Realtime endpoints (implemented):
+- `POST /v1/openai-realtime/session?model=gpt-realtime`
+  - bootstraps OpenAI realtime session server-side
+- `WS /v1/openai-realtime/ws?model=gpt-realtime`
+  - bi-directional relay for audio append + transcript/text delta events

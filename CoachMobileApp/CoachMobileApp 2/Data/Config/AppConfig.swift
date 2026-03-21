@@ -87,4 +87,18 @@ enum AppConfig {
 
         return components?.url ?? URL(string: "ws://127.0.0.1:8787/v1/openai-realtime/ws")!
     }
+
+    static var vocabularyExtractURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("vocabulary")
+            .appendingPathComponent("extract-from-audio")
+    }
+
+    static var vocabularyExamplesURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("vocabulary")
+            .appendingPathComponent("examples")
+    }
 }

@@ -284,6 +284,116 @@ async function rewriteAndCoach({ mode, transcript }) {
   };
 }
 
+async function extractVocabularyFromTranscript(transcript) {
+  const safeTranscript = String(transcript || "").trim();
+  if (!safeTranscript) {
+    return {
+      transcript: "",
+      phrase: "",
+      meaning: "",
+      corrected_sentence: ""
+    };
+  }
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "phrase": "string",\n  "meaning": "string",\n  "corrected_sentence": "string"\n}\nRules:\n- phrase must be one useful word or short phrase (max 4 words) from transcript\n- meaning should be concise and learner-friendly\n- corrected_sentence must naturally include the phrase`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: "You are an English vocabulary coach. Output only valid JSON in the requested shape."
+        },
+        {
+          role: "user",
+          content: `Transcript:\n${safeTranscript}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI vocabulary extraction failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Could not parse vocabulary extraction JSON from model response.");
+  }
+
+  const phrase = String(parsed.phrase || "").trim();
+  const meaning = String(parsed.meaning || "").trim();
+  const correctedSentence = String(parsed.corrected_sentence || "").trim();
+
+  return {
+    transcript: safeTranscript,
+    phrase,
+    meaning,
+    corrected_sentence: correctedSentence
+  };
+}
+
+async function generateVocabularyExamples(phrase) {
+  const cleanPhrase = String(phrase || "").trim();
+  if (!cleanPhrase) return [];
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "examples": ["string"]\n}\nRules:\n- Generate exactly 6 examples\n- Use diverse contexts: casual, professional, academic, question, negative, and motivational\n- Keep each sentence natural and concise\n- Every sentence must include the exact phrase: ${cleanPhrase}`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content: "You are an English teacher focused on practical sentence examples. Output only valid JSON."
+        },
+        {
+          role: "user",
+          content: `Phrase: ${cleanPhrase}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI vocabulary examples failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Could not parse vocabulary examples JSON from model response.");
+  }
+
+  if (!Array.isArray(parsed.examples)) return [];
+
+  return parsed.examples
+    .filter((item) => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
 function sanitizeSessionTitle(rawTitle, transcriptFallback) {
   const normalized = String(rawTitle || "")
     .replace(/[\r\n]+/g, " ")
@@ -548,6 +658,69 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, {
         ...fallback,
         tips: [...fallback.tips, "Temporary fallback response used due to upstream processing issue."]
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/vocabulary/extract-from-audio") {
+    const contentType = req.headers["content-type"] || "";
+    const boundaryMatch = contentType.match(/boundary=(.+)$/);
+    if (!boundaryMatch) {
+      return sendJson(res, 400, { error: "Expected multipart/form-data with boundary" });
+    }
+
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = Buffer.concat(chunks);
+    const parsed = parseMultipart(body, boundaryMatch[1]);
+    const audio = parsed.audio;
+
+    if (!audio || !audio.data || audio.data.length === 0) {
+      return sendJson(res, 400, { error: "audio file is required" });
+    }
+
+    try {
+      const transcript = await transcribeAudio(audio);
+      const extracted = await extractVocabularyFromTranscript(transcript);
+
+      return sendJson(res, 200, {
+        transcript: extracted.transcript,
+        phrase: extracted.phrase,
+        meaning: extracted.meaning,
+        corrected_sentence: extracted.corrected_sentence
+      });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to extract vocabulary from audio"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/vocabulary/examples") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const phrase = String(payload?.phrase || "").trim();
+      if (!phrase) {
+        return sendJson(res, 400, { error: "phrase is required" });
+      }
+
+      const examples = await generateVocabularyExamples(phrase);
+      return sendJson(res, 200, { examples });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to generate vocabulary examples"
       });
     }
   }

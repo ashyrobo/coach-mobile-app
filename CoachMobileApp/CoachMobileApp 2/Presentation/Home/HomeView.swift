@@ -18,7 +18,7 @@ struct HomeView: View {
                     Label("Realtime", systemImage: "waveform.and.mic")
                 }
 
-            VocabularyView(vocabularyStore: viewModel.vocabularyStore)
+            VocabularyView(viewModel: viewModel)
                 .tabItem {
                     Label("Vocabulary", systemImage: "text.book.closed.fill")
                 }
@@ -97,8 +97,10 @@ private struct RealtimeView: View {
 }
 
 private struct VocabularyView: View {
-    @ObservedObject var vocabularyStore: VocabularyStore
+    @ObservedObject var viewModel: VoiceSessionViewModel
     @State private var searchText: String = ""
+
+    private var vocabularyStore: VocabularyStore { viewModel.vocabularyStore }
 
     private var filteredItems: [VocabularyItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -160,14 +162,43 @@ private struct VocabularyView: View {
                 }
             }
             .navigationTitle("Vocabulary")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search words or phrases")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task {
+                            if viewModel.isVocabularyVoiceRecording {
+                                await viewModel.stopVocabularyVoiceCaptureAndSave()
+                            } else {
+                                await viewModel.startVocabularyVoiceCapture()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: viewModel.isVocabularyVoiceRecording ? "stop.circle.fill" : "mic.circle.fill")
+                    }
+                    .tint(viewModel.isVocabularyVoiceRecording ? .red : .blue)
+                    .accessibilityLabel(viewModel.isVocabularyVoiceRecording ? "Stop voice add" : "Start voice add")
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !viewModel.vocabularyVoiceStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(viewModel.vocabularyVoiceStatusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial)
+                }
+            }
         }
     }
 
     @ViewBuilder
     private func vocabularyRow(for item: VocabularyItem) -> some View {
         NavigationLink {
-            VocabularyDetailView(item: item)
+            VocabularyDetailView(viewModel: viewModel, item: item)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -209,13 +240,28 @@ private struct VocabularyView: View {
 }
 
 private struct VocabularyDetailView: View {
+    @ObservedObject var viewModel: VoiceSessionViewModel
     let item: VocabularyItem
+
+    private var examples: [String] {
+        viewModel.vocabularyExamples(for: item)
+    }
+
+    private var isLoadingExamples: Bool {
+        viewModel.vocabularyExamplesLoadingID == item.id
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(item.phrase)
                     .font(.title3.weight(.semibold))
+
+                Group {
+                    Text("Meaning")
+                        .font(.headline)
+                    Text(item.meaning)
+                }
 
                 Group {
                     Text("Your Spoken Sentence")
@@ -229,6 +275,24 @@ private struct VocabularyDetailView: View {
                     Text(item.correctedSentence)
                 }
 
+                Group {
+                    Text("Use Cases")
+                        .font(.headline)
+
+                    if isLoadingExamples {
+                        ProgressView("Generating examples...")
+                    } else if examples.isEmpty {
+                        Text("Examples will be generated automatically.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(examples.enumerated()), id: \.offset) { index, sentence in
+                                Text("\(index + 1). \(sentence)")
+                            }
+                        }
+                    }
+                }
+
                 Text("Saved on \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -238,6 +302,9 @@ private struct VocabularyDetailView: View {
         }
         .navigationTitle("Vocabulary Item")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: item.id) {
+            await viewModel.loadVocabularyExamples(for: item)
+        }
     }
 }
 

@@ -3,6 +3,8 @@
 ## Current Status
 Core MVP loop is validated on physical iPhone: record → transcribe → rewrite/coaching works end-to-end.
 
+Latest implementation milestone completed: separate **Realtime** tab and backend realtime relay are now integrated for speech-in/live-text-out flow.
+
 Latest direction update: user validated physical-device run and requested a personal-use path to run without local backend-proxy dependency.
 
 Latest stabilization update: realtime on-device transcript display has been reworked to reduce pause-related clearing, long-silence resets, and duplication artifacts; further tuning remains for rare duplicate sentence cases.
@@ -53,6 +55,40 @@ Latest stabilization update: realtime on-device transcript display has been rewo
 - Realtime chat lifecycle hardening is now implemented in iOS RealtimeChatViewModel:
   - session bootstrap is refreshed automatically if ephemeral client secret is expired or near expiry before connect/reconnect
   - dropped realtime WebRTC sessions trigger automatic reconnect with exponential backoff and capped retry attempts
+- Realtime baseline path is now implemented end-to-end (proxy-backed):
+  - iOS `Realtime` tab with Start/Stop and live text area
+  - iOS realtime service streams mic audio chunks and appends text deltas in UI
+  - backend `POST /v1/openai-realtime/session` created
+  - backend `WS /v1/openai-realtime/ws` relay created (OpenAI Realtime forwarding)
+  - realtime default model config set to `gpt-realtime`
+- Realtime conversation UX/control improvements now implemented:
+  - distinct realtime event types for user transcript vs assistant reply
+  - delta parsing routes supported OpenAI event variants to correct stream (no mixed single buffer)
+  - ViewModel now keeps separate text streams:
+    - `You said`
+    - `Assistant replied`
+  - Realtime UI now renders two dedicated panes for those streams
+  - assistant behavior instructions are now configurable via `AppConfig.realtimeAssistantInstructions`
+  - `Reset Conversation` button now clears both panes and refreshes realtime session context when active
+  - lifecycle stability validated with successful `xcodebuild` compile after changes
+- Remote deployment posture validated at architecture level:
+  - app can run on phone without localhost backend when deployed backend URL is configured (e.g., Render)
+- Repo hygiene updates completed:
+  - `.gitignore` now ignores `backend-proxy/node_modules/`
+  - `.gitignore` now ignores `*.xcuserstate`
+  - backend lockfile generation captured (`backend-proxy/package-lock.json`)
+- Vocabulary learning flow has been expanded:
+  - manual **spoken add** from Vocabulary tab is now implemented (mic start/stop -> OpenAI STT extraction)
+  - extracted spoken input now produces structured vocabulary item data (`phrase`, `meaning`, `corrected_sentence`)
+  - vocabulary detail now auto-generates comprehensive usage examples (multiple sentence contexts)
+  - generated examples are cached and persisted with each vocabulary item
+  - vocabulary tab header now uses compact inline title (large title removed)
+- Backend proxy supports vocabulary AI endpoints:
+  - `POST /v1/vocabulary/extract-from-audio`
+  - `POST /v1/vocabulary/examples`
+- Build validation completed after vocabulary feature implementation:
+  - `node --check backend-proxy/src/server.js` passed
+  - `xcodebuild` for `CoachMobileApp` simulator build passed
 
 ## What’s Left to Build
 1. Confirm/document canonical iOS source path and clean duplicate folder ambiguity.
@@ -62,6 +98,7 @@ Latest stabilization update: realtime on-device transcript display has been rewo
 5. Add tests (ViewModel/use-case unit tests + backend contract tests) and basic analytics/error tracking.
 6. Add optional direct-to-OpenAI iOS mode for personal prototype operation (while keeping proxy mode for security/release).
 7. Continue refining realtime merge heuristics to eliminate occasional repeated sentence artifacts after long pauses/re-segmentation.
+8. Run device-level validation pass for new realtime relay flow and confirm incoming OpenAI event variants are fully covered by delta parsing logic.
 
 ## Known Risks / Considerations
 - Latency and quality trade-offs between local and cloud transcription.
@@ -72,24 +109,23 @@ Latest stabilization update: realtime on-device transcript display has been rewo
 - Apple Speech partial/final segmentation can vary by pause cadence and locale, creating edge cases where live text may still duplicate unless merge logic is carefully tuned.
 
 ## Next Milestone
-Move from validated MVP to durable v1 baseline: canonicalized project structure, persisted history, initial automated tests, and clearer settings diagnostics for billing endpoint restrictions.
+Move from validated MVP to durable v1 baseline: canonicalized project structure, persisted history, initial automated tests, and production-hardening of newly added realtime relay path.
 
 ## Deferred Roadmap: OpenAI Realtime Full Wiring (Future)
 
 ### Now (keep current stable behavior)
-- Keep `OpenAI Realtime Streaming` selectable as preview/scaffold.
-- Keep primary runtime flow as batch processing: record -> `POST /v1/process-audio`.
-- Keep UI messaging explicit that full realtime session wiring is not enabled yet.
+- Keep primary runtime flow for rewriting/coaching as batch processing: record -> `POST /v1/process-audio`.
+- Realtime tab now provides a simple parallel mode for live transcript streaming.
 
 ### Next (when realtime implementation starts)
-- Backend:
-  - add websocket relay path (planned: `/v1/openai-realtime/ws`)
-  - wire OpenAI realtime session bootstrap + bi-directional event forwarding
-  - upgrade `/v1/openai-realtime-capabilities` from placeholder to runtime truth
-- iOS:
-  - add dedicated realtime streaming service (connect/send audio/receive transcript)
-  - route audio pipeline by transcription method (Apple on-device vs OpenAI realtime)
-  - update ViewModel lifecycle handling for realtime connect/pause/resume/stop
+- Backend (partially done):
+  - websocket relay path implemented: `/v1/openai-realtime/ws`
+  - realtime session bootstrap implemented: `POST /v1/openai-realtime/session`
+  - next: add richer relay diagnostics and capability introspection endpoint if needed
+- iOS (partially done):
+  - dedicated realtime streaming service implemented (connect/send audio/receive transcript deltas)
+  - dedicated `Realtime` tab implemented
+  - next: improve lifecycle hardening/reconnect and event compatibility coverage
 
 ### Later (hardening and polish)
 - Add rewrite-only endpoint (planned: `POST /v1/rewrite-text`) so realtime transcript is not retranscribed.

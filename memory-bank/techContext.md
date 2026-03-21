@@ -9,6 +9,9 @@
 - **AI Cloud**: OpenAI (transcription fallback + rewrite/coaching)
 - **Local Persistence**: SwiftData (or Core Data if needed)
 - **Networking**: URLSession + Codable
+- **Realtime transport**:
+  - iOS client to backend relay via `URLSessionWebSocketTask`
+  - backend relay to OpenAI Realtime via Node `ws`
 
 ## Backend Proxy (for API key safety)
 Preferred lightweight options:
@@ -22,6 +25,10 @@ Responsibilities:
 - Forward transcription/rewrite requests to OpenAI
 - Return normalized JSON contract to iOS app
 - Optionally provide best-effort billing/usage summaries for in-app settings visibility
+- For realtime mode, expose:
+  - `POST /v1/openai-realtime/session`
+  - `WS /v1/openai-realtime/ws`
+  - relay realtime events to OpenAI (`gpt-realtime`) while keeping permanent API key server-side
 
 ## Operational Constraints
 - Never hardcode OpenAI key in iOS bundle.
@@ -30,6 +37,7 @@ Responsibilities:
 - Request microphone and speech permissions with clear rationale text.
 - OpenAI billing/usage endpoints are not uniformly available for every account type, org role, or key scope.
 - In-app billing/usage UI must tolerate restricted endpoints and present fallback messaging.
+- Realtime websocket path must be reachable over secure `wss://` for deployed app usage.
 
 ## Personal Prototype Exception (Documented)
 - User is currently single-user and requested an independent app path without backend-proxy.
@@ -64,5 +72,16 @@ Responsibilities:
   - `GET /v1/openai-credit`
   - `GET /v1/openai-usage-month`
 - Both endpoints are best-effort and designed to return friendly fallback messages when upstream access is restricted.
+
+## Implemented Realtime Baseline (Current)
+- iOS UI includes dedicated `Realtime` tab:
+  - Start/Stop controls
+  - live streamed text rendering
+- iOS config includes:
+  - `openAIRealtimeModel` (default `gpt-realtime`)
+  - realtime session + websocket URLs derived from base URL
+- backend-proxy includes realtime relay/session bootstrap endpoints.
+- backend `package.json` now depends on `ws`.
+- `.gitignore` updated to ignore `backend-proxy/node_modules/` and `*.xcuserstate`.
 
 

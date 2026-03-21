@@ -28,6 +28,10 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var realtimeStatusMessage: String = "Realtime idle"
     @Published var realtimeLiveText: String = ""
     @Published var isRealtimeRunning: Bool = false
+    @Published var isVocabularyVoiceRecording: Bool = false
+    @Published var vocabularyVoiceStatusMessage: String = ""
+    @Published var vocabularyExamplesByItemID: [UUID: [String]] = [:]
+    @Published var vocabularyExamplesLoadingID: UUID?
 
     let historyStore: SessionHistoryStore
     let vocabularyStore: VocabularyStore
@@ -35,6 +39,8 @@ final class VoiceSessionViewModel: ObservableObject {
     private let permissionService: PermissionServicing
     private let audioRecorderService: AudioRecorderServicing
     private let processVoiceSessionUseCase: ProcessVoiceSessionUseCase
+    private let voiceProcessingService: VoiceProcessingServicing
+    private let vocabularyAudioRecorderService: AudioRecorderServicing
     private let realtimeStreamingService = OpenAIRealtimeStreamingService()
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
@@ -50,8 +56,11 @@ final class VoiceSessionViewModel: ObservableObject {
         self.vocabularyStore = vocabularyStore
         self.permissionService = permissionService
         self.audioRecorderService = audioRecorderService
+        self.voiceProcessingService = voiceProcessingService
+        self.vocabularyAudioRecorderService = AudioRecorderService()
         self.processVoiceSessionUseCase = ProcessVoiceSessionUseCase(voiceProcessingService: voiceProcessingService)
         applyTranscriptionMethodSelection()
+        hydrateVocabularyExamplesCache()
     }
 
     convenience init() {
@@ -278,6 +287,102 @@ final class VoiceSessionViewModel: ObservableObject {
             realtimeStatusMessage = "Realtime stopped"
         }
     }
+
+    func startVocabularyVoiceCapture() async {
+        do {
+            guard !isVocabularyVoiceRecording else { return }
+            try await requestRequiredPermissions()
+            try await vocabularyAudioRecorderService.startRecording()
+
+            isVocabularyVoiceRecording = true
+            vocabularyVoiceStatusMessage = "Listening..."
+        } catch {
+            isVocabularyVoiceRecording = false
+            vocabularyVoiceStatusMessage = error.localizedDescription
+        }
+    }
+
+    func stopVocabularyVoiceCaptureAndSave() async {
+        guard isVocabularyVoiceRecording else { return }
+
+        do {
+            let audioURL = try await vocabularyAudioRecorderService.stopRecording()
+            isVocabularyVoiceRecording = false
+            vocabularyVoiceStatusMessage = "Processing spoken phrase..."
+
+            let extracted = try await voiceProcessingService.extractVocabularyFromAudio(at: audioURL)
+
+            let phrase = extracted.phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+            let corrected = extracted.correctedSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !phrase.isEmpty, !corrected.isEmpty else {
+                vocabularyVoiceStatusMessage = "Could not detect a clear word or phrase. Try again."
+                return
+            }
+
+            let outcome = try vocabularyStore.addManualVocabulary(
+                phrase: phrase,
+                spokenSentence: extracted.transcript,
+                correctedSentence: corrected,
+                mode: .rewordBetter,
+                meaningOverride: extracted.meaning
+            )
+
+            switch outcome {
+            case .added:
+                vocabularyVoiceStatusMessage = "Added \"\(phrase)\" to Vocabulary"
+            case .alreadyExists:
+                vocabularyVoiceStatusMessage = "\"\(phrase)\" is already in Vocabulary"
+            case .invalid:
+                vocabularyVoiceStatusMessage = "Could not save this vocabulary item"
+            }
+        } catch {
+            isVocabularyVoiceRecording = false
+            vocabularyVoiceStatusMessage = "Unable to process voice add: \(error.localizedDescription)"
+        }
+    }
+
+    func vocabularyExamples(for item: VocabularyItem) -> [String] {
+        if let cached = vocabularyExamplesByItemID[item.id], !cached.isEmpty {
+            return cached
+        }
+        return item.exampleSentences
+    }
+
+    func loadVocabularyExamples(for item: VocabularyItem) async {
+        if let cached = vocabularyExamplesByItemID[item.id], !cached.isEmpty { return }
+        if !item.exampleSentences.isEmpty {
+            vocabularyExamplesByItemID[item.id] = item.exampleSentences
+            return
+        }
+
+        let phrase = item.phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return }
+
+        vocabularyExamplesLoadingID = item.id
+        defer {
+            if vocabularyExamplesLoadingID == item.id {
+                vocabularyExamplesLoadingID = nil
+            }
+        }
+
+        do {
+            let examples = try await voiceProcessingService.generateVocabularyExamples(for: phrase)
+            guard !examples.isEmpty else { return }
+            vocabularyExamplesByItemID[item.id] = examples
+            vocabularyStore.updateExamples(for: item.id, examples: examples)
+        } catch {
+            vocabularyVoiceStatusMessage = "Could not load examples for \"\(phrase)\""
+        }
+    }
+
+    private func hydrateVocabularyExamplesCache() {
+        var cache: [UUID: [String]] = [:]
+        for item in vocabularyStore.items where !item.exampleSentences.isEmpty {
+            cache[item.id] = item.exampleSentences
+        }
+        vocabularyExamplesByItemID = cache
+    }
 }
 
 final class SessionHistoryStore: ObservableObject {
@@ -384,6 +489,19 @@ struct VocabularyItem: Identifiable, Codable {
     let meaning: String
     let spokenSentence: String
     let correctedSentence: String
+    let exampleSentences: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case sourceSessionID
+        case phrase
+        case tag
+        case meaning
+        case spokenSentence
+        case correctedSentence
+        case exampleSentences
+    }
 
     init(
         id: UUID = UUID(),
@@ -393,7 +511,8 @@ struct VocabularyItem: Identifiable, Codable {
         tag: String? = nil,
         meaning: String,
         spokenSentence: String,
-        correctedSentence: String
+        correctedSentence: String,
+        exampleSentences: [String] = []
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -403,6 +522,20 @@ struct VocabularyItem: Identifiable, Codable {
         self.meaning = meaning
         self.spokenSentence = spokenSentence
         self.correctedSentence = correctedSentence
+        self.exampleSentences = exampleSentences
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        sourceSessionID = try container.decode(UUID.self, forKey: .sourceSessionID)
+        phrase = try container.decode(String.self, forKey: .phrase)
+        tag = try container.decodeIfPresent(String.self, forKey: .tag)
+        meaning = try container.decode(String.self, forKey: .meaning)
+        spokenSentence = try container.decode(String.self, forKey: .spokenSentence)
+        correctedSentence = try container.decode(String.self, forKey: .correctedSentence)
+        exampleSentences = try container.decodeIfPresent([String].self, forKey: .exampleSentences) ?? []
     }
 }
 
@@ -457,6 +590,7 @@ final class VocabularyStore: ObservableObject {
         spokenSentence: String,
         correctedSentence: String,
         mode: RewriteMode,
+        meaningOverride: String? = nil,
         sourceSessionID: UUID = UUID()
     ) throws -> ManualAddOutcome {
         let cleanPhrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -480,7 +614,9 @@ final class VocabularyStore: ObservableObject {
             sourceSessionID: sourceSessionID,
             phrase: cleanPhrase,
             tag: vocabularyTag(for: mode),
-            meaning: "Saved from word improvements.",
+            meaning: meaningOverride?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? meaningOverride!.trimmingCharacters(in: .whitespacesAndNewlines)
+                : "Saved from word improvements.",
             spokenSentence: cleanSpokenSentence.isEmpty ? cleanCorrectedSentence : cleanSpokenSentence,
             correctedSentence: cleanCorrectedSentence
         )
@@ -497,6 +633,35 @@ final class VocabularyStore: ObservableObject {
             try persistItems()
         } catch {
             print("Failed to persist vocabulary delete: \(error.localizedDescription)")
+        }
+    }
+
+    func updateExamples(for id: UUID, examples: [String]) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+
+        let cleanExamples = examples
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !cleanExamples.isEmpty else { return }
+
+        let existing = items[index]
+        items[index] = VocabularyItem(
+            id: existing.id,
+            createdAt: existing.createdAt,
+            sourceSessionID: existing.sourceSessionID,
+            phrase: existing.phrase,
+            tag: existing.tag,
+            meaning: existing.meaning,
+            spokenSentence: existing.spokenSentence,
+            correctedSentence: existing.correctedSentence,
+            exampleSentences: cleanExamples
+        )
+
+        do {
+            try persistItems()
+        } catch {
+            print("Failed to persist vocabulary examples: \(error.localizedDescription)")
         }
     }
 
