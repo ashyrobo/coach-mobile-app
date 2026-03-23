@@ -555,6 +555,7 @@
 				DEVELOPMENT_TEAM = GRS2C9GKMC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SpeakUp;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Coach needs microphone access to record your speaking practice.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Coach uses speech recognition to transcribe your recordings for rewriting and coaching.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -589,6 +590,7 @@
 				DEVELOPMENT_TEAM = GRS2C9GKMC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SpeakUp;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Coach needs microphone access to record your speaking practice.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Coach uses speech recognition to transcribe your recordings for rewriting and coaching.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

@@ -1,6 +1,18 @@
 import Combine
 import Foundation
 
+enum VocabularyFlashcardState: String, Codable {
+    case new
+    case learning
+    case review
+}
+
+enum VocabularyReviewRating {
+    case again
+    case good
+    case easy
+}
+
 @MainActor
 final class VoiceSessionViewModel: ObservableObject {
     enum RecordingState {
@@ -32,6 +44,12 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var vocabularyVoiceStatusMessage: String = ""
     @Published var vocabularyExamplesByItemID: [UUID: [String]] = [:]
     @Published var vocabularyExamplesLoadingID: UUID?
+    @Published var vocabularyPracticeQueue: [VocabularyItem] = []
+    @Published var vocabularyPracticeCurrentItem: VocabularyItem?
+    @Published var isVocabularyPracticeAnswerRevealed: Bool = false
+    @Published var vocabularyPracticeReviewedToday: Int = 0
+    @Published var vocabularyPracticeDueCount: Int = 0
+    @Published var isVocabularyPracticeActive: Bool = false
 
     let historyStore: SessionHistoryStore
     let vocabularyStore: VocabularyStore
@@ -61,6 +79,11 @@ final class VoiceSessionViewModel: ObservableObject {
         self.processVoiceSessionUseCase = ProcessVoiceSessionUseCase(voiceProcessingService: voiceProcessingService)
         applyTranscriptionMethodSelection()
         hydrateVocabularyExamplesCache()
+        refreshVocabularyPracticeStats()
+
+        Task { [weak self] in
+            await self?.syncVocabularyFromCloud()
+        }
     }
 
     convenience init() {
@@ -204,6 +227,7 @@ final class VoiceSessionViewModel: ObservableObject {
             switch outcome {
             case .added:
                 statusMessage = "Added to vocabulary"
+                Task { await syncVocabularyToCloud() }
             case .alreadyExists:
                 statusMessage = "Already in vocabulary"
             case .invalid:
@@ -331,6 +355,7 @@ final class VoiceSessionViewModel: ObservableObject {
             switch outcome {
             case .added:
                 vocabularyVoiceStatusMessage = "Added \"\(phrase)\" to Vocabulary"
+                await syncVocabularyToCloud()
             case .alreadyExists:
                 vocabularyVoiceStatusMessage = "\"\(phrase)\" is already in Vocabulary"
             case .invalid:
@@ -371,9 +396,38 @@ final class VoiceSessionViewModel: ObservableObject {
             guard !examples.isEmpty else { return }
             vocabularyExamplesByItemID[item.id] = examples
             vocabularyStore.updateExamples(for: item.id, examples: examples)
+            await syncVocabularyToCloud()
         } catch {
             vocabularyVoiceStatusMessage = "Could not load examples for \"\(phrase)\""
         }
+    }
+
+    func syncVocabularyFromCloud() async {
+        do {
+            let cloudItems = try await voiceProcessingService.fetchCloudVocabulary()
+            vocabularyStore.replaceAllItems(with: cloudItems)
+            hydrateVocabularyExamplesCache()
+            refreshVocabularyPracticeStats()
+            if !cloudItems.isEmpty {
+                vocabularyVoiceStatusMessage = "Vocabulary synced from cloud"
+            }
+        } catch {
+            vocabularyVoiceStatusMessage = "Cloud sync download failed"
+        }
+    }
+
+    func syncVocabularyToCloud() async {
+        do {
+            try await voiceProcessingService.replaceCloudVocabulary(with: vocabularyStore.items)
+        } catch {
+            vocabularyVoiceStatusMessage = "Cloud sync upload failed"
+        }
+    }
+
+    func deleteVocabularyItem(id: UUID, maxNewCardsPerDay: Int = 5) {
+        vocabularyStore.deleteItem(id: id)
+        refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
+        Task { await syncVocabularyToCloud() }
     }
 
     private func hydrateVocabularyExamplesCache() {
@@ -382,6 +436,61 @@ final class VoiceSessionViewModel: ObservableObject {
             cache[item.id] = item.exampleSentences
         }
         vocabularyExamplesByItemID = cache
+    }
+
+    func startVocabularyPractice(maxNewCardsPerDay: Int = 5) {
+        let queue = vocabularyStore.buildPracticeQueue(maxNewCardsPerDay: maxNewCardsPerDay)
+        vocabularyPracticeQueue = queue
+        vocabularyPracticeCurrentItem = queue.first
+        isVocabularyPracticeAnswerRevealed = false
+        isVocabularyPracticeActive = !queue.isEmpty
+        refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
+    }
+
+    func revealCurrentVocabularyCardAnswer() {
+        guard vocabularyPracticeCurrentItem != nil else { return }
+        isVocabularyPracticeAnswerRevealed = true
+    }
+
+    func rateCurrentVocabularyCard(_ rating: VocabularyReviewRating, maxNewCardsPerDay: Int = 5) {
+        guard let current = vocabularyPracticeCurrentItem else { return }
+
+        do {
+            _ = try vocabularyStore.markReview(id: current.id, rating: rating)
+        } catch {
+            vocabularyVoiceStatusMessage = "Could not save card review."
+        }
+
+        advanceVocabularyPracticeQueue(maxNewCardsPerDay: maxNewCardsPerDay)
+    }
+
+    func endVocabularyPractice(maxNewCardsPerDay: Int = 5) {
+        vocabularyPracticeQueue = []
+        vocabularyPracticeCurrentItem = nil
+        isVocabularyPracticeAnswerRevealed = false
+        isVocabularyPracticeActive = false
+        refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
+    }
+
+    func refreshVocabularyPracticeStats(maxNewCardsPerDay: Int = 5) {
+        vocabularyPracticeReviewedToday = vocabularyStore.reviewedCount(on: Date())
+        vocabularyPracticeDueCount = vocabularyStore.buildPracticeQueue(maxNewCardsPerDay: maxNewCardsPerDay).count
+    }
+
+    private func advanceVocabularyPracticeQueue(maxNewCardsPerDay: Int = 5) {
+        guard !vocabularyPracticeQueue.isEmpty else {
+            vocabularyPracticeCurrentItem = nil
+            isVocabularyPracticeAnswerRevealed = false
+            isVocabularyPracticeActive = false
+            refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
+            return
+        }
+
+        vocabularyPracticeQueue.removeFirst()
+        vocabularyPracticeCurrentItem = vocabularyPracticeQueue.first
+        isVocabularyPracticeAnswerRevealed = false
+        isVocabularyPracticeActive = vocabularyPracticeCurrentItem != nil
+        refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
     }
 }
 
@@ -490,6 +599,10 @@ struct VocabularyItem: Identifiable, Codable {
     let spokenSentence: String
     let correctedSentence: String
     let exampleSentences: [String]
+    let flashcardState: VocabularyFlashcardState
+    let nextReviewAt: Date
+    let lastReviewedAt: Date?
+    let reviewCount: Int
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -501,6 +614,10 @@ struct VocabularyItem: Identifiable, Codable {
         case spokenSentence
         case correctedSentence
         case exampleSentences
+        case flashcardState
+        case nextReviewAt
+        case lastReviewedAt
+        case reviewCount
     }
 
     init(
@@ -512,7 +629,11 @@ struct VocabularyItem: Identifiable, Codable {
         meaning: String,
         spokenSentence: String,
         correctedSentence: String,
-        exampleSentences: [String] = []
+        exampleSentences: [String] = [],
+        flashcardState: VocabularyFlashcardState = .new,
+        nextReviewAt: Date = Date(),
+        lastReviewedAt: Date? = nil,
+        reviewCount: Int = 0
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -523,6 +644,10 @@ struct VocabularyItem: Identifiable, Codable {
         self.spokenSentence = spokenSentence
         self.correctedSentence = correctedSentence
         self.exampleSentences = exampleSentences
+        self.flashcardState = flashcardState
+        self.nextReviewAt = nextReviewAt
+        self.lastReviewedAt = lastReviewedAt
+        self.reviewCount = reviewCount
     }
 
     init(from decoder: Decoder) throws {
@@ -536,6 +661,10 @@ struct VocabularyItem: Identifiable, Codable {
         spokenSentence = try container.decode(String.self, forKey: .spokenSentence)
         correctedSentence = try container.decode(String.self, forKey: .correctedSentence)
         exampleSentences = try container.decodeIfPresent([String].self, forKey: .exampleSentences) ?? []
+        flashcardState = try container.decodeIfPresent(VocabularyFlashcardState.self, forKey: .flashcardState) ?? .new
+        nextReviewAt = try container.decodeIfPresent(Date.self, forKey: .nextReviewAt) ?? createdAt
+        lastReviewedAt = try container.decodeIfPresent(Date.self, forKey: .lastReviewedAt)
+        reviewCount = try container.decodeIfPresent(Int.self, forKey: .reviewCount) ?? 0
     }
 }
 
@@ -551,6 +680,14 @@ final class VocabularyStore: ObservableObject {
     private let fileManager = FileManager.default
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let defaults = UserDefaults.standard
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     private var vocabularyFileURL: URL {
         documentsDirectory.appendingPathComponent("vocabulary-items.json")
@@ -563,6 +700,77 @@ final class VocabularyStore: ObservableObject {
     init() {
         encoder.outputFormatting = [.prettyPrinted]
         loadItems()
+    }
+
+    func buildPracticeQueue(maxNewCardsPerDay: Int = 5, now: Date = Date()) -> [VocabularyItem] {
+        let dueReviewCards = items
+            .filter { $0.flashcardState != .new && $0.nextReviewAt <= now }
+            .sorted {
+                if $0.nextReviewAt != $1.nextReviewAt {
+                    return $0.nextReviewAt < $1.nextReviewAt
+                }
+                return $0.createdAt < $1.createdAt
+            }
+
+        let remainingAllowance = max(0, maxNewCardsPerDay - newCardsReviewedCount(on: now))
+        let newCards = items
+            .filter { $0.flashcardState == .new }
+            .sorted { $0.createdAt < $1.createdAt }
+            .prefix(remainingAllowance)
+
+        return dueReviewCards + newCards
+    }
+
+    func reviewedCount(on date: Date = Date()) -> Int {
+        defaults.integer(forKey: reviewedCountKey(for: date))
+    }
+
+    @discardableResult
+    func markReview(id: UUID, rating: VocabularyReviewRating, now: Date = Date()) throws -> VocabularyItem? {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return nil }
+
+        let existing = items[index]
+        let wasNew = existing.flashcardState == .new
+        let nextDate: Date
+        let nextState: VocabularyFlashcardState
+
+        switch rating {
+        case .again:
+            nextDate = Calendar.current.date(byAdding: .minute, value: 10, to: now) ?? now
+            nextState = .learning
+        case .good:
+            nextDate = Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now
+            nextState = .review
+        case .easy:
+            nextDate = Calendar.current.date(byAdding: .day, value: 3, to: now) ?? now
+            nextState = .review
+        }
+
+        let updated = VocabularyItem(
+            id: existing.id,
+            createdAt: existing.createdAt,
+            sourceSessionID: existing.sourceSessionID,
+            phrase: existing.phrase,
+            tag: existing.tag,
+            meaning: existing.meaning,
+            spokenSentence: existing.spokenSentence,
+            correctedSentence: existing.correctedSentence,
+            exampleSentences: existing.exampleSentences,
+            flashcardState: nextState,
+            nextReviewAt: nextDate,
+            lastReviewedAt: now,
+            reviewCount: existing.reviewCount + 1
+        )
+
+        items[index] = updated
+
+        if wasNew {
+            incrementNewCardsReviewedCount(on: now)
+        }
+        incrementReviewedCount(on: now)
+
+        try persistItems()
+        return updated
     }
 
     func autoSaveVocabulary(from session: VoiceSession) throws {
@@ -636,6 +844,15 @@ final class VocabularyStore: ObservableObject {
         }
     }
 
+    func replaceAllItems(with cloudItems: [VocabularyItem]) {
+        items = cloudItems.sorted { $0.createdAt > $1.createdAt }
+        do {
+            try persistItems()
+        } catch {
+            print("Failed to persist cloud vocabulary replace: \(error.localizedDescription)")
+        }
+    }
+
     func updateExamples(for id: UUID, examples: [String]) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
 
@@ -655,7 +872,11 @@ final class VocabularyStore: ObservableObject {
             meaning: existing.meaning,
             spokenSentence: existing.spokenSentence,
             correctedSentence: existing.correctedSentence,
-            exampleSentences: cleanExamples
+            exampleSentences: cleanExamples,
+            flashcardState: existing.flashcardState,
+            nextReviewAt: existing.nextReviewAt,
+            lastReviewedAt: existing.lastReviewedAt,
+            reviewCount: existing.reviewCount
         )
 
         do {
@@ -790,5 +1011,33 @@ final class VocabularyStore: ObservableObject {
         case .rewordBetter:
             return "Fluency"
         }
+    }
+
+    private func dayStamp(for date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
+    private func newCardsReviewedKey(for date: Date) -> String {
+        "vocabulary-new-reviewed-\(dayStamp(for: date))"
+    }
+
+    private func reviewedCountKey(for date: Date) -> String {
+        "vocabulary-reviewed-total-\(dayStamp(for: date))"
+    }
+
+    private func newCardsReviewedCount(on date: Date) -> Int {
+        defaults.integer(forKey: newCardsReviewedKey(for: date))
+    }
+
+    private func incrementNewCardsReviewedCount(on date: Date) {
+        let key = newCardsReviewedKey(for: date)
+        let current = defaults.integer(forKey: key)
+        defaults.set(current + 1, forKey: key)
+    }
+
+    private func incrementReviewedCount(on date: Date) {
+        let key = reviewedCountKey(for: date)
+        let current = defaults.integer(forKey: key)
+        defaults.set(current + 1, forKey: key)
     }
 }

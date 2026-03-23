@@ -4,6 +4,8 @@ protocol VoiceProcessingServicing {
     func processAudio(at audioURL: URL, mode: RewriteMode) async throws -> RewriteResult
     func extractVocabularyFromAudio(at audioURL: URL) async throws -> VocabularyExtractionResult
     func generateVocabularyExamples(for phrase: String) async throws -> [String]
+    func fetchCloudVocabulary() async throws -> [VocabularyItem]
+    func replaceCloudVocabulary(with items: [VocabularyItem]) async throws
 }
 
 struct VocabularyExtractionResult: Codable {

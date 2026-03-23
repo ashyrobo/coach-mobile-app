@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coach Vocabulary Manager</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; background: #f7f7fb; color: #1f2937; }
+      h1 { margin: 0 0 8px; }
+      p { margin: 0 0 16px; color: #6b7280; }
+      .bar { display: flex; gap: 8px; margin-bottom: 14px; }
+      button { border: 1px solid #d1d5db; background: #fff; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+      button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+      .status { margin-bottom: 12px; font-size: 13px; color: #374151; }
+      table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
+      th, td { border-bottom: 1px solid #f0f2f6; text-align: left; padding: 10px; font-size: 13px; vertical-align: top; }
+      th { background: #f9fafb; color: #4b5563; }
+      input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 8px; padding: 7px; font-size: 13px; }
+      textarea { min-height: 52px; resize: vertical; }
+      .row-actions { display: flex; gap: 6px; }
+      .small { font-size: 12px; color: #6b7280; }
+    </style>
+  </head>
+  <body>
+    <h1>Vocabulary Manager</h1>
+    <p>Manage vocabulary in cloud storage. iPhone app can sync to this same list.</p>
+
+    <div class="bar">
+      <button class="primary" id="reloadBtn">Reload</button>
+      <button id="addBtn">Add Item</button>
+      <button id="saveBtn">Save All</button>
+    </div>
+
+    <div class="status" id="status">Ready.</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 14%">Phrase</th>
+          <th style="width: 16%">Meaning</th>
+          <th style="width: 18%">Spoken</th>
+          <th style="width: 18%">Corrected</th>
+          <th style="width: 10%">Tag</th>
+          <th style="width: 10%">Examples (one per line)</th>
+          <th style="width: 14%">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const tableBody = document.getElementById("tableBody");
+      let items = [];
+
+      const setStatus = (text) => {
+        statusEl.textContent = text;
+      };
+
+      const isoNow = () => new Date().toISOString();
+
+      const newVocabularyItem = () => {
+        const now = isoNow();
+        return {
+          id: crypto.randomUUID(),
+          createdAt: now,
+          sourceSessionID: crypto.randomUUID(),
+          phrase: "",
+          tag: "Manual",
+          meaning: "",
+          spokenSentence: "",
+          correctedSentence: "",
+          exampleSentences: [],
+          flashcardState: "new",
+          nextReviewAt: now,
+          lastReviewedAt: null,
+          reviewCount: 0
+        };
+      };
+
+      const toExamplesArray = (value) =>
+        String(value || "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+
+      const render = () => {
+        tableBody.innerHTML = "";
+
+        items.forEach((item, index) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><input data-field="phrase" value="${escapeHtml(item.phrase || "")}" /></td>
+            <td><textarea data-field="meaning">${escapeHtml(item.meaning || "")}</textarea></td>
+            <td><textarea data-field="spokenSentence">${escapeHtml(item.spokenSentence || "")}</textarea></td>
+            <td><textarea data-field="correctedSentence">${escapeHtml(item.correctedSentence || "")}</textarea></td>
+            <td><input data-field="tag" value="${escapeHtml(item.tag || "")}" /></td>
+            <td><textarea data-field="exampleSentences">${escapeHtml((item.exampleSentences || []).join("\n"))}</textarea></td>
+            <td>
+              <div class="row-actions">
+                <button data-action="duplicate">Duplicate</button>
+                <button data-action="delete">Delete</button>
+              </div>
+              <div class="small" style="margin-top:8px;">${escapeHtml(item.id || "")}</div>
+            </td>
+          `;
+
+          tr.querySelectorAll("input, textarea").forEach((el) => {
+            el.addEventListener("input", (e) => {
+              const field = e.target.getAttribute("data-field");
+              if (!field) return;
+              if (field === "exampleSentences") {
+                item.exampleSentences = toExamplesArray(e.target.value);
+              } else {
+                item[field] = e.target.value;
+              }
+            });
+          });
+
+          tr.querySelector('[data-action="delete"]').addEventListener("click", () => {
+            items.splice(index, 1);
+            render();
+          });
+
+          tr.querySelector('[data-action="duplicate"]').addEventListener("click", () => {
+            const clone = {
+              ...item,
+              id: crypto.randomUUID(),
+              sourceSessionID: crypto.randomUUID(),
+              createdAt: isoNow()
+            };
+            items.splice(index + 1, 0, clone);
+            render();
+          });
+
+          tableBody.appendChild(tr);
+        });
+      };
+
+      const escapeHtml = (value) =>
+        String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+
+      const loadCloud = async () => {
+        setStatus("Loading cloud vocabulary...");
+        try {
+          const res = await fetch("/v1/vocabulary/cloud");
+          const data = await res.json();
+          items = Array.isArray(data.items) ? data.items : [];
+          render();
+          setStatus(`Loaded ${items.length} items.`);
+        } catch (e) {
+          setStatus(`Load failed: ${e.message || e}`);
+        }
+      };
+
+      const saveCloud = async () => {
+        setStatus("Saving cloud vocabulary...");
+        try {
+          const payload = {
+            items: items.map((item) => ({
+              ...item,
+              id: item.id || crypto.randomUUID(),
+              sourceSessionID: item.sourceSessionID || crypto.randomUUID(),
+              createdAt: item.createdAt || isoNow(),
+              nextReviewAt: item.nextReviewAt || item.createdAt || isoNow(),
+              flashcardState: item.flashcardState || "new",
+              reviewCount: Number.isFinite(Number(item.reviewCount)) ? Number(item.reviewCount) : 0,
+              exampleSentences: Array.isArray(item.exampleSentences) ? item.exampleSentences : []
+            }))
+          };
+
+          const res = await fetch("/v1/vocabulary/cloud", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || `HTTP ${res.status}`);
+          }
+
+          setStatus(`Saved ${items.length} items.`);
+        } catch (e) {
+          setStatus(`Save failed: ${e.message || e}`);
+        }
+      };
+
+      document.getElementById("reloadBtn").addEventListener("click", loadCloud);
+      document.getElementById("saveBtn").addEventListener("click", saveCloud);
+      document.getElementById("addBtn").addEventListener("click", () => {
+        items.unshift(newVocabularyItem());
+        render();
+      });
+
+      loadCloud();
+    </script>
+  </body>
+</html>

@@ -26,6 +26,34 @@ Latest reliability pass focused on:
 - Next cleanup pass should confirm and document the canonical source path used for active development.
 
 ## Recent Changes
+- Implemented **Level 1 Vocabulary Flashcard Practice** in active iOS tree (`CoachMobileApp/CoachMobileApp 2`):
+  - extended `VocabularyItem` with flashcard metadata:
+    - `flashcardState` (`new` / `learning` / `review`)
+    - `nextReviewAt`
+    - `lastReviewedAt`
+    - `reviewCount`
+  - added Level 1 practice scheduling in `VocabularyStore`:
+    - due cards: non-new cards where `nextReviewAt <= now`
+    - daily new-card cap (default 5/day)
+    - rating actions with fixed intervals:
+      - `Again` -> +10 minutes
+      - `Good` -> +1 day
+      - `Easy` -> +3 days
+  - added daily progress counters via `UserDefaults`:
+    - reviewed today
+    - new cards reviewed today
+  - added ViewModel practice state/actions in `VoiceSessionViewModel`:
+    - queue/current-card/reveal-state/session-active tracking
+    - `startVocabularyPractice`, `revealCurrentVocabularyCardAnswer`, `rateCurrentVocabularyCard`, `endVocabularyPractice`
+    - live stats refresh (`due`, `reviewed today`)
+  - added Vocabulary tab practice UI in `HomeView`:
+    - `Start Practice` / `End Practice` toolbar control
+    - flashcard front (phrase) + `Show Answer`
+    - answer panel (meaning + corrected sentence)
+    - rating buttons (`Again`, `Good`, `Easy`)
+    - due/reviewed counters + no-cards-due completion state
+  - compile validation passed via `xcodebuild` on iOS Simulator (`iPhone 17` destination)
+
 - Implemented **voice-driven manual Vocabulary add** flow (proxy-backed OpenAI STT + extraction):
   - iOS vocabulary tab now has mic/stop toolbar action to capture short spoken input
   - new ViewModel state/actions in `VoiceSessionViewModel`:

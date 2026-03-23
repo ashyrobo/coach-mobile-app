@@ -2,6 +2,11 @@ import Foundation
 import AVFoundation
 
 final class VoiceProcessingAPIService: VoiceProcessingServicing {
+    private struct VocabularyCloudPayload: Codable {
+        let updatedAt: String?
+        let items: [VocabularyItem]
+    }
+
     func processAudio(at audioURL: URL, mode: RewriteMode) async throws -> RewriteResult {
         let endpoint = AppConfig.voiceProcessingBaseURL
             .appendingPathComponent("v1")
@@ -79,6 +84,44 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
             let payload = try JSONDecoder().decode(VocabularyExamplesResponse.self, from: data)
             return payload.examples.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func fetchCloudVocabulary() async throws -> [VocabularyItem] {
+        var request = URLRequest(url: AppConfig.vocabularyCloudURL)
+        request.httpMethod = "GET"
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(VocabularyCloudPayload.self, from: data)
+            return payload.items
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func replaceCloudVocabulary(with items: [VocabularyItem]) async throws {
+        var request = URLRequest(url: AppConfig.vocabularyCloudURL)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        request.httpBody = try JSONEncoder().encode(VocabularyCloudPayload(updatedAt: nil, items: items))
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
         } catch let error as AppError {
             throw error
         } catch {

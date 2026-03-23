@@ -101,4 +101,11 @@ enum AppConfig {
             .appendingPathComponent("vocabulary")
             .appendingPathComponent("examples")
     }
+
+    static var vocabularyCloudURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("vocabulary")
+            .appendingPathComponent("cloud")
+    }
 }

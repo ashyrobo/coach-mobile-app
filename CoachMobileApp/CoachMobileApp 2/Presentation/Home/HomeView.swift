@@ -98,64 +98,61 @@ private struct RealtimeView: View {
 
 private struct VocabularyView: View {
     @ObservedObject var viewModel: VoiceSessionViewModel
-    @State private var searchText: String = ""
+    private let practiceMaxNewCardsPerDay = 5
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
 
     private var vocabularyStore: VocabularyStore { viewModel.vocabularyStore }
 
-    private var filteredItems: [VocabularyItem] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return vocabularyStore.items }
-
-        return vocabularyStore.items.filter { item in
-            item.phrase.localizedCaseInsensitiveContains(query)
-            || item.meaning.localizedCaseInsensitiveContains(query)
-            || item.spokenSentence.localizedCaseInsensitiveContains(query)
-            || item.correctedSentence.localizedCaseInsensitiveContains(query)
-        }
-    }
-
     private var wordItems: [VocabularyItem] {
-        filteredItems.filter { vocabularyCategory(for: $0.phrase) == .word }
+        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .word }
     }
 
     private var phraseItems: [VocabularyItem] {
-        filteredItems.filter { vocabularyCategory(for: $0.phrase) == .phrase }
+        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .phrase }
     }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if filteredItems.isEmpty {
-                    ContentUnavailableView(
-                        searchText.isEmpty ? "No Vocabulary Yet" : "No Matches",
-                        systemImage: "text.book.closed",
-                        description: Text(
-                            searchText.isEmpty
-                            ? "Add words or phrases from Word Improvements and they will show up here."
-                            : "Try another search term."
-                        )
-                    )
-                } else {
-                    List {
-                        if !wordItems.isEmpty {
-                            Section("Words") {
-                                ForEach(wordItems) { item in
-                                    vocabularyRow(for: item)
-                                }
-                                .onDelete { offsets in
-                                    deleteItems(in: wordItems, at: offsets)
-                                }
-                            }
-                        }
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        Label("Due: \(viewModel.vocabularyPracticeDueCount)", systemImage: "calendar.badge.clock")
+                        Label("Reviewed today: \(viewModel.vocabularyPracticeReviewedToday)", systemImage: "checkmark.circle")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
 
-                        if !phraseItems.isEmpty {
-                            Section("Phrases") {
-                                ForEach(phraseItems) { item in
-                                    vocabularyRow(for: item)
+                if viewModel.isVocabularyPracticeActive {
+                    vocabularyPracticeView
+                } else {
+                    Group {
+                        if vocabularyStore.items.isEmpty {
+                            ContentUnavailableView(
+                                "No Vocabulary Yet",
+                                systemImage: "text.book.closed",
+                                description: Text(
+                                    "Add words or phrases from Word Improvements and they will show up here."
+                                )
+                            )
+                        } else {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    if !wordItems.isEmpty {
+                                        wordGridSection(items: wordItems)
+                                    }
+
+                                    if !phraseItems.isEmpty {
+                                        phraseListSection(items: phraseItems)
+                                    }
                                 }
-                                .onDelete { offsets in
-                                    deleteItems(in: phraseItems, at: offsets)
-                                }
+                                .padding(.horizontal)
+                                .padding(.vertical, 10)
                             }
                         }
                     }
@@ -163,8 +160,26 @@ private struct VocabularyView: View {
             }
             .navigationTitle("Vocabulary")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search words or phrases")
+            .onAppear {
+                viewModel.refreshVocabularyPracticeStats(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+            }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if viewModel.isVocabularyPracticeActive {
+                            viewModel.endVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                        } else {
+                            viewModel.startVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                        }
+                    } label: {
+                        Label(
+                            viewModel.isVocabularyPracticeActive ? "End Practice" : "Start Practice",
+                            systemImage: viewModel.isVocabularyPracticeActive ? "xmark.circle.fill" : "play.circle.fill"
+                        )
+                    }
+                    .disabled(vocabularyStore.items.isEmpty)
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task {
@@ -197,30 +212,180 @@ private struct VocabularyView: View {
 
     @ViewBuilder
     private func vocabularyRow(for item: VocabularyItem) -> some View {
-        NavigationLink {
-            VocabularyDetailView(viewModel: viewModel, item: item)
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(item.phrase)
-                        .font(.headline)
-                    Spacer()
-                }
-
-                if let tag = item.tag, !tag.isEmpty {
-                    Text(tag)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 4)
+        if vocabularyCategory(for: item.phrase) == .word {
+            wordTile(for: item)
+        } else {
+            phraseRow(for: item)
         }
     }
 
-    private func deleteItems(in sourceItems: [VocabularyItem], at offsets: IndexSet) {
-        for offset in offsets {
-            guard sourceItems.indices.contains(offset) else { continue }
-            vocabularyStore.deleteItem(id: sourceItems[offset].id)
+    @ViewBuilder
+    private func wordTile(for item: VocabularyItem) -> some View {
+        NavigationLink {
+            VocabularyDetailView(viewModel: viewModel, item: item)
+        } label: {
+            Text(item.phrase)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                viewModel.deleteVocabularyItem(id: item.id, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func phraseRow(for item: VocabularyItem) -> some View {
+        NavigationLink {
+            VocabularyDetailView(viewModel: viewModel, item: item)
+        } label: {
+            HStack(spacing: 8) {
+                Text(item.phrase)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 6)
+
+                if let tag = item.tag, !tag.isEmpty {
+                    Text(tag)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.12))
+                        .clipShape(Capsule())
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                viewModel.deleteVocabularyItem(id: item.id, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var vocabularyPracticeView: some View {
+        if let current = viewModel.vocabularyPracticeCurrentItem {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Flashcard Practice")
+                    .font(.headline)
+
+                Text(current.phrase)
+                    .font(.title2.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                if viewModel.isVocabularyPracticeAnswerRevealed {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Meaning")
+                            .font(.subheadline.weight(.semibold))
+                        Text(current.meaning)
+                            .font(.subheadline)
+
+                        Text("Example")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.top, 4)
+                        Text(current.correctedSentence)
+                            .font(.subheadline)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    HStack(spacing: 10) {
+                        Button("Again") {
+                            viewModel.rateCurrentVocabularyCard(.again, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Good") {
+                            viewModel.rateCurrentVocabularyCard(.good, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Easy") {
+                            viewModel.rateCurrentVocabularyCard(.easy, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    Button("Show Answer") {
+                        viewModel.revealCurrentVocabularyCardAnswer()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                Text("Remaining cards: \(viewModel.vocabularyPracticeQueue.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding()
+        } else {
+            ContentUnavailableView(
+                "No Cards Due",
+                systemImage: "checkmark.circle",
+                description: Text("You’re done for now. Great job.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func wordGridSection(items: [VocabularyItem]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Words")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                ForEach(items) { item in
+                    wordTile(for: item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func phraseListSection(items: [VocabularyItem]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Phrases")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 8) {
+                ForEach(items) { item in
+                    phraseRow(for: item)
+                }
+            }
         }
     }
 
@@ -253,49 +418,79 @@ private struct VocabularyDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(item.phrase)
-                    .font(.title3.weight(.semibold))
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let tag = item.tag, !tag.isEmpty {
+                        Text(tag.uppercased())
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
 
-                Group {
-                    Text("Meaning")
-                        .font(.headline)
-                    Text(item.meaning)
+                    Text(item.phrase)
+                        .font(.title2.weight(.bold))
+
+                    Text("Saved on \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Group {
-                    Text("Your Spoken Sentence")
-                        .font(.headline)
-                    Text(item.spokenSentence)
-                }
+                vocabularyInfoCard(
+                    title: "Meaning",
+                    icon: "book.closed.fill",
+                    accentColor: .indigo,
+                    content: item.meaning
+                )
 
-                Group {
-                    Text("Corrected Sentence")
-                        .font(.headline)
-                    Text(item.correctedSentence)
-                }
+                vocabularyInfoCard(
+                    title: "Your Spoken Sentence",
+                    icon: "mic.fill",
+                    accentColor: .orange,
+                    content: item.spokenSentence
+                )
 
-                Group {
-                    Text("Use Cases")
+                vocabularyInfoCard(
+                    title: "Corrected Sentence",
+                    icon: "checkmark.seal.fill",
+                    accentColor: .green,
+                    content: item.correctedSentence
+                )
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Use Cases", systemImage: "text.badge.star")
                         .font(.headline)
+                        .foregroundStyle(.purple)
 
                     if isLoadingExamples {
                         ProgressView("Generating examples...")
                     } else if examples.isEmpty {
                         Text("Examples will be generated automatically.")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
                             ForEach(Array(examples.enumerated()), id: \.offset) { index, sentence in
-                                Text("\(index + 1). \(sentence)")
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("\(index + 1)")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.purple)
+                                        .frame(width: 18, height: 18)
+                                        .background(Color.purple.opacity(0.12))
+                                        .clipShape(Circle())
+
+                                    Text(sentence)
+                                        .font(.subheadline)
+                                }
                             }
                         }
                     }
                 }
-
-                Text("Saved on \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
@@ -305,6 +500,27 @@ private struct VocabularyDetailView: View {
         .task(id: item.id) {
             await viewModel.loadVocabularyExamples(for: item)
         }
+    }
+
+    @ViewBuilder
+    private func vocabularyInfoCard(
+        title: String,
+        icon: String,
+        accentColor: Color,
+        content: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundStyle(accentColor)
+
+            Text(content)
+                .font(.body)
+                .foregroundStyle(.primary)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

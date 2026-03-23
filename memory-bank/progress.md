@@ -83,12 +83,26 @@ Latest stabilization update: realtime on-device transcript display has been rewo
   - vocabulary detail now auto-generates comprehensive usage examples (multiple sentence contexts)
   - generated examples are cached and persisted with each vocabulary item
   - vocabulary tab header now uses compact inline title (large title removed)
+- Level 1 vocabulary flashcard practice is now implemented:
+  - vocabulary item model now stores flashcard review metadata (`flashcardState`, `nextReviewAt`, `lastReviewedAt`, `reviewCount`)
+  - practice queue logic now supports due cards + daily cap for new cards (default 5/day)
+  - review ratings are implemented with fixed scheduling:
+    - `Again` -> review again in 10 minutes
+    - `Good` -> review in 1 day
+    - `Easy` -> review in 3 days
+  - Vocabulary tab now includes in-app practice flow:
+    - `Start Practice` / `End Practice`
+    - flashcard front + reveal answer
+    - rating buttons (`Again`, `Good`, `Easy`)
+    - due count + reviewed-today counters
+  - daily counters for reviewed/new-reviewed are persisted via `UserDefaults`
 - Backend proxy supports vocabulary AI endpoints:
   - `POST /v1/vocabulary/extract-from-audio`
   - `POST /v1/vocabulary/examples`
 - Build validation completed after vocabulary feature implementation:
   - `node --check backend-proxy/src/server.js` passed
   - `xcodebuild` for `CoachMobileApp` simulator build passed
+  - `xcodebuild` for `CoachMobileApp` simulator build passed after Level 1 flashcard additions (`iPhone 17`)
 
 ## What’s Left to Build
 1. Confirm/document canonical iOS source path and clean duplicate folder ambiguity.

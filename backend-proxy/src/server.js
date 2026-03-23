@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 
@@ -32,6 +32,52 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
 const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime";
+const CLOUD_VOCABULARY_FILE_PATH = resolve(process.cwd(), "data", "cloud-vocabulary.json");
+const VOCABULARY_MANAGER_PAGE_PATH = resolve(process.cwd(), "src", "vocabulary-manager.html");
+
+function ensureCloudVocabularyFile() {
+  const dataDir = resolve(process.cwd(), "data");
+  if (!existsSync(dataDir)) {
+    mkdirSync(dataDir, { recursive: true });
+  }
+
+  if (!existsSync(CLOUD_VOCABULARY_FILE_PATH)) {
+    writeFileSync(
+      CLOUD_VOCABULARY_FILE_PATH,
+      JSON.stringify({ updatedAt: new Date().toISOString(), items: [] }, null, 2),
+      "utf8"
+    );
+  }
+}
+
+function readCloudVocabularyStore() {
+  ensureCloudVocabularyFile();
+
+  try {
+    const raw = readFileSync(CLOUD_VOCABULARY_FILE_PATH, "utf8");
+    const parsed = safeJsonParse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { updatedAt: new Date().toISOString(), items: [] };
+    }
+
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString();
+    return { updatedAt, items };
+  } catch {
+    return { updatedAt: new Date().toISOString(), items: [] };
+  }
+}
+
+function writeCloudVocabularyStore(items) {
+  ensureCloudVocabularyFile();
+  const payload = {
+    updatedAt: new Date().toISOString(),
+    items: Array.isArray(items) ? items : []
+  };
+
+  writeFileSync(CLOUD_VOCABULARY_FILE_PATH, JSON.stringify(payload, null, 2), "utf8");
+  return payload;
+}
 
 function parseRequestURL(req) {
   const host = req.headers.host || `127.0.0.1:${PORT}`;
@@ -84,6 +130,11 @@ function enforceTextOnlySessionUpdate(messageText) {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+function sendHtml(res, statusCode, html) {
+  res.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html);
 }
 
 async function readJsonBody(req) {
@@ -556,6 +607,38 @@ const server = createServer(async (req, res) => {
       status: "ok",
       openai_configured: Boolean(OPENAI_API_KEY)
     });
+  }
+
+  if (req.method === "GET" && req.url === "/vocabulary-manager") {
+    try {
+      const html = readFileSync(VOCABULARY_MANAGER_PAGE_PATH, "utf8");
+      return sendHtml(res, 200, html);
+    } catch {
+      return sendHtml(res, 500, "<h1>Could not load vocabulary manager page.</h1>");
+    }
+  }
+
+  if (req.method === "GET" && req.url === "/v1/vocabulary/cloud") {
+    const payload = readCloudVocabularyStore();
+    return sendJson(res, 200, payload);
+  }
+
+  if (req.method === "PUT" && req.url === "/v1/vocabulary/cloud") {
+    try {
+      const body = await readJsonBody(req);
+      const items = Array.isArray(body?.items) ? body.items : null;
+
+      if (!items) {
+        return sendJson(res, 400, { error: "items array is required" });
+      }
+
+      const saved = writeCloudVocabularyStore(items);
+      return sendJson(res, 200, saved);
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to save cloud vocabulary"
+      });
+    }
   }
 
   if (req.method === "GET" && req.url === "/v1/openai-credit") {
