@@ -5,48 +5,215 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Coach Vocabulary Manager</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; background: #f7f7fb; color: #1f2937; }
-      h1 { margin: 0 0 8px; }
-      p { margin: 0 0 16px; color: #6b7280; }
-      .bar { display: flex; gap: 8px; margin-bottom: 14px; }
-      button { border: 1px solid #d1d5db; background: #fff; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
-      button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
-      .status { margin-bottom: 12px; font-size: 13px; color: #374151; }
-      table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
-      th, td { border-bottom: 1px solid #f0f2f6; text-align: left; padding: 10px; font-size: 13px; vertical-align: top; }
-      th { background: #f9fafb; color: #4b5563; }
-      input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 8px; padding: 7px; font-size: 13px; }
-      textarea { min-height: 52px; resize: vertical; }
-      .row-actions { display: flex; gap: 6px; }
-      .small { font-size: 12px; color: #6b7280; }
+      :root {
+        --bg: #f4f6fb;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --line: #e8ecf3;
+        --primary: #2563eb;
+        --primary-soft: #eff6ff;
+        --danger: #dc2626;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        background: linear-gradient(160deg, #f8f9fd 0%, var(--bg) 100%);
+        color: var(--text);
+      }
+
+      .container {
+        max-width: 1120px;
+        margin: 32px auto;
+        padding: 0 18px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 10px 26px rgba(17, 24, 39, 0.06);
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+
+      .title-wrap h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .title-wrap p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--text);
+        border-radius: 10px;
+        padding: 9px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      button:hover {
+        background: #f9fbff;
+      }
+
+      button.primary {
+        background: var(--primary);
+        color: #fff;
+        border-color: var(--primary);
+      }
+
+      button.primary:hover {
+        filter: brightness(0.96);
+      }
+
+      button.danger {
+        color: var(--danger);
+      }
+
+      .status {
+        margin: 8px 0 14px;
+        font-size: 13px;
+        color: #334155;
+        background: var(--primary-soft);
+        border: 1px solid #dbeafe;
+        border-radius: 10px;
+        padding: 8px 10px;
+      }
+
+      .table-wrap {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #f1f4fa;
+        text-align: left;
+        padding: 12px;
+        font-size: 13px;
+        vertical-align: top;
+      }
+
+      th {
+        background: #f8fafc;
+        color: #4b5563;
+        font-weight: 600;
+      }
+
+      td.actions {
+        min-width: 150px;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid #dbe2ef;
+        border-radius: 9px;
+        padding: 8px;
+        font-size: 13px;
+        background: #fff;
+      }
+
+      input:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #93c5fd;
+        box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.2);
+      }
+
+      textarea {
+        min-height: 64px;
+        resize: vertical;
+      }
+
+      .row-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .empty {
+        text-align: center;
+        color: var(--muted);
+        padding: 28px 10px;
+        font-size: 14px;
+      }
+
+      @media (max-width: 760px) {
+        .header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .bar {
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>Vocabulary Manager</h1>
-    <p>Manage vocabulary in cloud storage. iPhone app can sync to this same list.</p>
+    <div class="container">
+      <div class="card">
+        <div class="header">
+          <div class="title-wrap">
+            <h1>Vocabulary Manager</h1>
+            <p>Clean editor for cloud vocabulary synced with your iPhone app.</p>
+          </div>
 
-    <div class="bar">
-      <button class="primary" id="reloadBtn">Reload</button>
-      <button id="addBtn">Add Item</button>
-      <button id="saveBtn">Save All</button>
+          <div class="bar">
+            <button id="reloadBtn">Reload</button>
+            <button id="addBtn">Add Item</button>
+            <button class="primary" id="saveBtn">Save Changes</button>
+          </div>
+        </div>
+
+        <div class="status" id="status">Ready.</div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 22%">Phrase</th>
+                <th style="width: 35%">Meaning</th>
+                <th style="width: 33%">Examples (one per line)</th>
+                <th style="width: 10%">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-
-    <div class="status" id="status">Ready.</div>
-
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 14%">Phrase</th>
-          <th style="width: 16%">Meaning</th>
-          <th style="width: 18%">Spoken</th>
-          <th style="width: 18%">Corrected</th>
-          <th style="width: 10%">Tag</th>
-          <th style="width: 10%">Examples (one per line)</th>
-          <th style="width: 14%">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="tableBody"></tbody>
-    </table>
 
     <script>
       const statusEl = document.getElementById("status");
@@ -87,21 +254,24 @@
       const render = () => {
         tableBody.innerHTML = "";
 
+        if (items.length === 0) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td colspan="4" class="empty">No vocabulary yet. Click <strong>Add Item</strong> to create your first word.</td>`;
+          tableBody.appendChild(tr);
+          return;
+        }
+
         items.forEach((item, index) => {
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td><input data-field="phrase" value="${escapeHtml(item.phrase || "")}" /></td>
             <td><textarea data-field="meaning">${escapeHtml(item.meaning || "")}</textarea></td>
-            <td><textarea data-field="spokenSentence">${escapeHtml(item.spokenSentence || "")}</textarea></td>
-            <td><textarea data-field="correctedSentence">${escapeHtml(item.correctedSentence || "")}</textarea></td>
-            <td><input data-field="tag" value="${escapeHtml(item.tag || "")}" /></td>
             <td><textarea data-field="exampleSentences">${escapeHtml((item.exampleSentences || []).join("\n"))}</textarea></td>
-            <td>
+            <td class="actions">
               <div class="row-actions">
                 <button data-action="duplicate">Duplicate</button>
-                <button data-action="delete">Delete</button>
+                <button class="danger" data-action="delete">Delete</button>
               </div>
-              <div class="small" style="margin-top:8px;">${escapeHtml(item.id || "")}</div>
             </td>
           `;
 
@@ -165,6 +335,9 @@
               ...item,
               id: item.id || crypto.randomUUID(),
               sourceSessionID: item.sourceSessionID || crypto.randomUUID(),
+              tag: typeof item.tag === "string" ? item.tag : "",
+              spokenSentence: typeof item.spokenSentence === "string" ? item.spokenSentence : "",
+              correctedSentence: typeof item.correctedSentence === "string" ? item.correctedSentence : "",
               createdAt: item.createdAt || isoNow(),
               nextReviewAt: item.nextReviewAt || item.createdAt || isoNow(),
               flashcardState: item.flashcardState || "new",
@@ -195,6 +368,7 @@
       document.getElementById("addBtn").addEventListener("click", () => {
         items.unshift(newVocabularyItem());
         render();
+        setStatus("New item added. Fill fields and click Save Changes.");
       });
 
       loadCloud();

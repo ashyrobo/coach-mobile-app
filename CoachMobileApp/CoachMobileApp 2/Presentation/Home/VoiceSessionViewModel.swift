@@ -404,7 +404,15 @@ final class VoiceSessionViewModel: ObservableObject {
 
     func syncVocabularyFromCloud() async {
         do {
+            let localItems = vocabularyStore.items
             let cloudItems = try await voiceProcessingService.fetchCloudVocabulary()
+
+            if cloudItems.isEmpty, !localItems.isEmpty {
+                try await voiceProcessingService.replaceCloudVocabulary(with: localItems)
+                vocabularyVoiceStatusMessage = "Uploaded local vocabulary to cloud"
+                return
+            }
+
             vocabularyStore.replaceAllItems(with: cloudItems)
             hydrateVocabularyExamplesCache()
             refreshVocabularyPracticeStats()
