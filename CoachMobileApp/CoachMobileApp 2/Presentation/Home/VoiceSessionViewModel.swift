@@ -37,9 +37,6 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var tips: [String] = []
     @Published var latestAudioURL: URL?
     @Published var lastProcessedMode: RewriteMode?
-    @Published var realtimeStatusMessage: String = "Realtime idle"
-    @Published var realtimeLiveText: String = ""
-    @Published var isRealtimeRunning: Bool = false
     @Published var isVocabularyVoiceRecording: Bool = false
     @Published var vocabularyVoiceStatusMessage: String = ""
     @Published var vocabularyExamplesByItemID: [UUID: [String]] = [:]
@@ -59,7 +56,6 @@ final class VoiceSessionViewModel: ObservableObject {
     private let processVoiceSessionUseCase: ProcessVoiceSessionUseCase
     private let voiceProcessingService: VoiceProcessingServicing
     private let vocabularyAudioRecorderService: AudioRecorderServicing
-    private let realtimeStreamingService = OpenAIRealtimeStreamingService()
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
 
@@ -217,11 +213,18 @@ final class VoiceSessionViewModel: ObservableObject {
         let mode = lastProcessedMode ?? selectedMode
 
         do {
+            let meaning = meaningForWordImprovementSuggestion(
+                phrase: trimmedPhrase,
+                spokenSentence: sourceSentence,
+                correctedSentence: correctedSentence
+            )
+
             let outcome = try vocabularyStore.addManualVocabulary(
                 phrase: trimmedPhrase,
                 spokenSentence: sourceSentence,
                 correctedSentence: correctedSentence,
-                mode: mode
+                mode: mode,
+                meaningOverride: meaning
             )
 
             switch outcome {
@@ -239,6 +242,31 @@ final class VoiceSessionViewModel: ObservableObject {
             statusMessage = "Unable to save vocabulary right now"
             return .invalid
         }
+    }
+
+    private func meaningForWordImprovementSuggestion(
+        phrase: String,
+        spokenSentence: String,
+        correctedSentence: String
+    ) -> String {
+        let cleanPhrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSpoken = spokenSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCorrected = correctedSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleanSpoken.isEmpty, cleanSpoken.caseInsensitiveCompare(cleanCorrected) != .orderedSame {
+            return "\"\(cleanPhrase)\" improves how you originally said: \"\(truncateMeaningContext(cleanSpoken, maxLength: 90))\""
+        }
+
+        if !cleanCorrected.isEmpty {
+            return "Useful phrase from your improved sentence: \"\(truncateMeaningContext(cleanCorrected, maxLength: 90))\""
+        }
+
+        return "Useful phrase from your processed session."
+    }
+
+    private func truncateMeaningContext(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        return "\(text.prefix(maxLength))…"
     }
 
     private func requestRequiredPermissions() async throws {
@@ -273,43 +301,6 @@ final class VoiceSessionViewModel: ObservableObject {
 
     private func applyTranscriptionMethodSelection() {
         _ = transcriptionMethod
-    }
-
-    func startRealtimeStreaming() async {
-        do {
-            try await requestRequiredPermissions()
-            realtimeLiveText = ""
-            realtimeStatusMessage = "Connecting to realtime..."
-
-            try await realtimeStreamingService.start { [weak self] event in
-                Task { @MainActor in
-                    guard let self else { return }
-
-                    switch event {
-                    case let .textDelta(chunk):
-                        self.realtimeLiveText += chunk
-                    case let .status(message):
-                        self.realtimeStatusMessage = message
-                    case let .error(message):
-                        self.realtimeStatusMessage = message
-                    }
-                }
-            }
-
-            isRealtimeRunning = true
-            realtimeStatusMessage = "Realtime streaming"
-        } catch {
-            isRealtimeRunning = false
-            realtimeStatusMessage = error.localizedDescription
-        }
-    }
-
-    func stopRealtimeStreaming() {
-        realtimeStreamingService.stop()
-        isRealtimeRunning = false
-        if realtimeStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            realtimeStatusMessage = "Realtime stopped"
-        }
     }
 
     func startVocabularyVoiceCapture() async {

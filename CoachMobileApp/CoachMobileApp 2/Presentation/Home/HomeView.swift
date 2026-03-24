@@ -13,11 +13,6 @@ struct HomeView: View {
                     Label("Record", systemImage: "mic.fill")
                 }
 
-            RealtimeView(viewModel: viewModel)
-                .tabItem {
-                    Label("Realtime", systemImage: "waveform.and.mic")
-                }
-
             VocabularyView(viewModel: viewModel)
                 .tabItem {
                     Label("Vocabulary", systemImage: "text.book.closed.fill")
@@ -36,69 +31,10 @@ struct HomeView: View {
     }
 }
 
-private struct RealtimeView: View {
-    @ObservedObject var viewModel: VoiceSessionViewModel
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                Text("Speech in → Realtime API → Live text out")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                Text("Model: \(AppConfig.openAIRealtimeModel)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(viewModel.realtimeStatusMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                HStack(spacing: 12) {
-                    Button {
-                        Task { await viewModel.startRealtimeStreaming() }
-                    } label: {
-                        Label("Start", systemImage: "play.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isRealtimeRunning)
-
-                    Button {
-                        viewModel.stopRealtimeStreaming()
-                    } label: {
-                        Label("Stop", systemImage: "stop.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!viewModel.isRealtimeRunning)
-                }
-
-                ScrollView {
-                    Text(viewModel.realtimeLiveText.isEmpty ? "Live transcript will appear here..." : viewModel.realtimeLiveText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .padding()
-            .navigationTitle("Realtime")
-            .onDisappear {
-                if viewModel.isRealtimeRunning {
-                    viewModel.stopRealtimeStreaming()
-                }
-            }
-        }
-    }
-}
-
 private struct VocabularyView: View {
     @ObservedObject var viewModel: VoiceSessionViewModel
     private let practiceMaxNewCardsPerDay = 5
+    private let recencyCalendar = Calendar.current
     private let columns: [GridItem] = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10)
@@ -124,6 +60,8 @@ private struct VocabularyView: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                    vocabularyStatusLegend
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
@@ -221,20 +159,42 @@ private struct VocabularyView: View {
 
     @ViewBuilder
     private func wordTile(for item: VocabularyItem) -> some View {
+        let style = styleForVocabularyItem(item)
+
         NavigationLink {
             VocabularyDetailView(viewModel: viewModel, item: item)
         } label: {
-            Text(item.phrase)
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .contentShape(Rectangle())
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(style.baseColor)
+                    .frame(width: 8, height: 8)
+
+                Text(item.phrase)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 6)
+
+                Text(style.recencyLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(style.baseColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(style.baseColor.opacity(0.14))
+                    .clipShape(Capsule())
+            }
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(style.backgroundColor)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(style.borderColor, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -248,10 +208,16 @@ private struct VocabularyView: View {
 
     @ViewBuilder
     private func phraseRow(for item: VocabularyItem) -> some View {
+        let style = styleForVocabularyItem(item)
+
         NavigationLink {
             VocabularyDetailView(viewModel: viewModel, item: item)
         } label: {
             HStack(spacing: 8) {
+                Circle()
+                    .fill(style.baseColor)
+                    .frame(width: 8, height: 8)
+
                 Text(item.phrase)
                     .font(.subheadline)
                     .lineLimit(1)
@@ -270,11 +236,24 @@ private struct VocabularyView: View {
                         .clipShape(Capsule())
                         .lineLimit(1)
                 }
+
+                Text(style.recencyLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(style.baseColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(style.baseColor.opacity(0.14))
+                    .clipShape(Capsule())
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color(.secondarySystemBackground))
+            .background(style.backgroundColor)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(style.borderColor, lineWidth: 1)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -401,6 +380,86 @@ private struct VocabularyView: View {
     private enum VocabularyCategory {
         case word
         case phrase
+    }
+
+    private struct VocabularyCardVisualStyle {
+        let baseColor: Color
+        let backgroundColor: Color
+        let borderColor: Color
+        let recencyLabel: String
+    }
+
+    @ViewBuilder
+    private var vocabularyStatusLegend: some View {
+        HStack(spacing: 10) {
+            legendPill(color: .orange, text: "Learning")
+            legendPill(color: .green, text: "Stable")
+            legendPill(color: .gray, text: "New/Stale")
+        }
+        .font(.caption2)
+    }
+
+    @ViewBuilder
+    private func legendPill(color: Color, text: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(text)
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    private func styleForVocabularyItem(_ item: VocabularyItem) -> VocabularyCardVisualStyle {
+        let baseColor: Color
+        switch item.flashcardState {
+        case .new:
+            baseColor = .gray
+        case .learning:
+            baseColor = .orange
+        case .review:
+            baseColor = .green
+        }
+
+        let recencyLabel = recencyLabel(for: item)
+        let recencyOpacity = recencyStrength(for: item)
+
+        return VocabularyCardVisualStyle(
+            baseColor: baseColor,
+            backgroundColor: baseColor.opacity(recencyOpacity),
+            borderColor: baseColor.opacity(0.38),
+            recencyLabel: recencyLabel
+        )
+    }
+
+    private func recencyStrength(for item: VocabularyItem, now: Date = Date()) -> Double {
+        guard let lastReviewedAt = item.lastReviewedAt else { return 0.08 }
+
+        let days = recencyCalendar.dateComponents([.day], from: lastReviewedAt, to: now).day ?? 99
+        switch days {
+        case ..<1:
+            return 0.25
+        case 1...7:
+            return 0.16
+        default:
+            return 0.10
+        }
+    }
+
+    private func recencyLabel(for item: VocabularyItem, now: Date = Date()) -> String {
+        guard let lastReviewedAt = item.lastReviewedAt else {
+            return item.flashcardState == .new ? "new" : "stale"
+        }
+
+        let days = recencyCalendar.dateComponents([.day], from: lastReviewedAt, to: now).day ?? 99
+        switch days {
+        case ..<1:
+            return "today"
+        case 1...7:
+            return "this week"
+        default:
+            return "stale"
+        }
     }
 }
 

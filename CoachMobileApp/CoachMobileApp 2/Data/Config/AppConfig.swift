@@ -51,43 +51,6 @@ enum AppConfig {
         UserDefaults.standard.set(method.rawValue, forKey: transcriptionMethodDefaultsKey)
     }
 
-    static var openAIRealtimeModel: String {
-        if let envValue = ProcessInfo.processInfo.environment["OPENAI_REALTIME_MODEL"],
-           !envValue.isEmpty {
-            return envValue
-        }
-
-        if let configured = UserDefaults.standard.string(forKey: "openaiRealtimeModel"),
-           !configured.isEmpty {
-            return configured
-        }
-
-        return "gpt-realtime"
-    }
-
-    static var realtimeSessionURL: URL {
-        voiceProcessingBaseURL
-            .appendingPathComponent("v1")
-            .appendingPathComponent("openai-realtime")
-            .appendingPathComponent("session")
-    }
-
-    static var realtimeWebSocketURL: URL {
-        var components = URLComponents(url: voiceProcessingBaseURL, resolvingAgainstBaseURL: false)
-        components?.path = "/v1/openai-realtime/ws"
-        components?.queryItems = [
-            URLQueryItem(name: "model", value: openAIRealtimeModel)
-        ]
-
-        if components?.scheme == "https" {
-            components?.scheme = "wss"
-        } else {
-            components?.scheme = "ws"
-        }
-
-        return components?.url ?? URL(string: "ws://127.0.0.1:8787/v1/openai-realtime/ws")!
-    }
-
     static var vocabularyExtractURL: URL {
         voiceProcessingBaseURL
             .appendingPathComponent("v1")

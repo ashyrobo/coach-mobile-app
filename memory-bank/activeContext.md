@@ -4,15 +4,15 @@
 Move from initial integration to **post-MVP stabilization** now that end-to-end iPhone flow is validated.
 
 Latest implementation pass completed:
-- added a separate in-app **Realtime** tab for speech-in/live-text-out
-- wired backend proxy realtime session bootstrap + websocket relay for OpenAI Realtime API (`gpt-realtime`, text-only output path)
+- removed the in-app **Realtime** tab and all iOS realtime state/service wiring
+- removed backend proxy realtime session/bootstrap websocket relay paths and `ws` dependency
 
 Latest UI/UX pass focused on:
 - richer in-session recording controls (record/pause/resume/stop + live timer)
 - settings observability for OpenAI account usage/cost visibility
 
 Latest reliability pass focused on:
-- stabilizing **on-device realtime transcription UX** during long pauses and pause/resume cycles
+- stabilizing recording + vocabulary workflows after removing realtime-only code paths
 
 ## User Preference Update (Latest)
 - User successfully ran/tested app on physical iPhone.
@@ -206,10 +206,9 @@ Latest reliability pass focused on:
 1. Document canonical iOS source-of-truth path and remove ambiguity between duplicate folders.
 2. Add local history persistence (SwiftData) and history UI.
 3. Add unit tests for ViewModel/use case and contract tests for backend response schema.
-4. Validate realtime tab against deployed backend (Render) on physical iPhone and capture any event-shape mismatches in delta parsing.
-5. Implement/validate optional direct OpenAI mode for personal use while preserving proxy mode for secure/release path.
-6. Improve settings diagnostics to distinguish: missing backend key vs restricted OpenAI role/scope vs unsupported endpoint.
-7. Continue tuning realtime STT merge behavior to eliminate occasional duplicate phrase/sentence artifacts after speech segmentation changes.
+4. Implement/validate optional direct OpenAI mode for personal use while preserving proxy mode for secure/release path.
+5. Improve settings diagnostics to distinguish: missing backend key vs restricted OpenAI role/scope vs unsupported endpoint.
+6. Continue tuning non-realtime transcript merge behavior for pause/resume edge cases.
 
 ## Revised Near-Term Plan
 1. Add/plan a **Direct OpenAI mode** in iOS (no backend proxy) for personal prototype usage.
