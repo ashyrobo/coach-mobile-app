@@ -1,4 +1,5 @@
 import Combine
+import AVFoundation
 import Foundation
 
 enum VocabularyFlashcardState: String, Codable {
@@ -47,6 +48,19 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var vocabularyPracticeReviewedToday: Int = 0
     @Published var vocabularyPracticeDueCount: Int = 0
     @Published var isVocabularyPracticeActive: Bool = false
+    @Published var shadowingItem: VocabularyItem?
+    @Published var shadowingPromptText: String = ""
+    @Published var isShadowingRecording: Bool = false
+    @Published var shadowingTranscript: String = ""
+    @Published var shadowingFeedbackMessage: String = ""
+    @Published var shadowingScore: Int = 0
+    @Published var currentSpeakingMission: SpeakingMission?
+    @Published var isGeneratingSpeakingMission: Bool = false
+    @Published var isMissionRecording: Bool = false
+    @Published var missionTranscript: String = ""
+    @Published var missionFeedbackMessage: String = ""
+    @Published var missionCoverageCount: Int = 0
+    @Published var missionCoverageTotal: Int = 0
 
     let historyStore: SessionHistoryStore
     let vocabularyStore: VocabularyStore
@@ -56,6 +70,8 @@ final class VoiceSessionViewModel: ObservableObject {
     private let processVoiceSessionUseCase: ProcessVoiceSessionUseCase
     private let voiceProcessingService: VoiceProcessingServicing
     private let vocabularyAudioRecorderService: AudioRecorderServicing
+    private let speakingPracticeAudioRecorderService: AudioRecorderServicing
+    private let speechSynthesizer = AVSpeechSynthesizer()
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
 
@@ -72,10 +88,12 @@ final class VoiceSessionViewModel: ObservableObject {
         self.audioRecorderService = audioRecorderService
         self.voiceProcessingService = voiceProcessingService
         self.vocabularyAudioRecorderService = AudioRecorderService()
+        self.speakingPracticeAudioRecorderService = AudioRecorderService()
         self.processVoiceSessionUseCase = ProcessVoiceSessionUseCase(voiceProcessingService: voiceProcessingService)
         applyTranscriptionMethodSelection()
         hydrateVocabularyExamplesCache()
         refreshVocabularyPracticeStats()
+        refreshShadowingCandidate()
 
         Task { [weak self] in
             await self?.syncVocabularyFromCloud()
@@ -426,6 +444,7 @@ final class VoiceSessionViewModel: ObservableObject {
     func deleteVocabularyItem(id: UUID, maxNewCardsPerDay: Int = 5) {
         vocabularyStore.deleteItem(id: id)
         refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
+        refreshShadowingCandidate()
         Task { await syncVocabularyToCloud() }
     }
 
@@ -435,6 +454,166 @@ final class VoiceSessionViewModel: ObservableObject {
             cache[item.id] = item.exampleSentences
         }
         vocabularyExamplesByItemID = cache
+    }
+
+    func refreshShadowingCandidate() {
+        if let current = shadowingItem,
+           vocabularyStore.items.contains(where: { $0.id == current.id }) {
+            updateShadowingPrompt(for: current)
+            return
+        }
+
+        shadowingItem = vocabularyStore.items.first
+        if let first = shadowingItem {
+            updateShadowingPrompt(for: first)
+        } else {
+            shadowingPromptText = ""
+        }
+    }
+
+    func cycleShadowingItem() {
+        guard !vocabularyStore.items.isEmpty else {
+            shadowingItem = nil
+            shadowingPromptText = ""
+            return
+        }
+
+        guard let current = shadowingItem,
+              let index = vocabularyStore.items.firstIndex(where: { $0.id == current.id }) else {
+            shadowingItem = vocabularyStore.items.first
+            if let first = shadowingItem { updateShadowingPrompt(for: first) }
+            return
+        }
+
+        let nextIndex = vocabularyStore.items.index(after: index)
+        let wrappedIndex = nextIndex < vocabularyStore.items.endIndex ? nextIndex : vocabularyStore.items.startIndex
+        let nextItem = vocabularyStore.items[wrappedIndex]
+        shadowingItem = nextItem
+        updateShadowingPrompt(for: nextItem)
+    }
+
+    func playShadowingPrompt() {
+        let text = shadowingPromptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.48
+        speechSynthesizer.speak(utterance)
+    }
+
+    func startShadowingCapture() async {
+        do {
+            guard !isShadowingRecording else { return }
+            try await requestRequiredPermissions()
+            try await speakingPracticeAudioRecorderService.startRecording()
+            isShadowingRecording = true
+            shadowingTranscript = ""
+            shadowingFeedbackMessage = "Listening... repeat the prompt naturally."
+        } catch {
+            isShadowingRecording = false
+            shadowingFeedbackMessage = error.localizedDescription
+        }
+    }
+
+    func stopShadowingCaptureAndEvaluate() async {
+        guard isShadowingRecording else { return }
+
+        do {
+            let audioURL = try await speakingPracticeAudioRecorderService.stopRecording()
+            isShadowingRecording = false
+            shadowingFeedbackMessage = "Evaluating your attempt..."
+
+            let transcript = try await voiceProcessingService.transcribePracticeAudio(at: audioURL)
+            shadowingTranscript = transcript
+
+            let phrase = shadowingItem?.phrase ?? ""
+            let evaluation = evaluateShadowingAttempt(
+                transcript: transcript,
+                promptText: shadowingPromptText,
+                requiredPhrase: phrase
+            )
+
+            shadowingScore = evaluation.score
+            shadowingFeedbackMessage = evaluation.feedback
+        } catch {
+            isShadowingRecording = false
+            shadowingFeedbackMessage = "Could not evaluate shadowing attempt: \(error.localizedDescription)"
+        }
+    }
+
+    func generateContextSpeakingMission() async {
+        let candidatePhrases = vocabularyStore.items
+            .prefix(3)
+            .map(\.phrase)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !candidatePhrases.isEmpty else {
+            missionFeedbackMessage = "Add a few vocabulary items first to create a mission."
+            return
+        }
+
+        isGeneratingSpeakingMission = true
+        defer { isGeneratingSpeakingMission = false }
+
+        do {
+            let mission = try await voiceProcessingService.generateSpeakingMission(from: candidatePhrases)
+            currentSpeakingMission = mission
+            missionTranscript = ""
+            missionCoverageCount = 0
+            missionCoverageTotal = mission.requiredPhrases.count
+            missionFeedbackMessage = "Mission ready. Speak for about 20–40 seconds."
+        } catch {
+            missionFeedbackMessage = "Could not generate mission: \(error.localizedDescription)"
+        }
+    }
+
+    func startMissionCapture() async {
+        do {
+            guard !isMissionRecording else { return }
+            guard currentSpeakingMission != nil else {
+                missionFeedbackMessage = "Generate a mission first."
+                return
+            }
+
+            try await requestRequiredPermissions()
+            try await speakingPracticeAudioRecorderService.startRecording()
+
+            isMissionRecording = true
+            missionTranscript = ""
+            missionFeedbackMessage = "Listening... include all required phrases."
+        } catch {
+            isMissionRecording = false
+            missionFeedbackMessage = error.localizedDescription
+        }
+    }
+
+    func stopMissionCaptureAndEvaluate() async {
+        guard isMissionRecording else { return }
+
+        do {
+            let audioURL = try await speakingPracticeAudioRecorderService.stopRecording()
+            isMissionRecording = false
+            missionFeedbackMessage = "Evaluating mission response..."
+
+            let transcript = try await voiceProcessingService.transcribePracticeAudio(at: audioURL)
+            missionTranscript = transcript
+
+            guard let mission = currentSpeakingMission else {
+                missionFeedbackMessage = "Mission context missing. Please generate again."
+                return
+            }
+
+            let evaluation = evaluateMissionAttempt(transcript: transcript, mission: mission)
+            missionCoverageCount = evaluation.covered
+            missionCoverageTotal = mission.requiredPhrases.count
+            missionFeedbackMessage = evaluation.feedback
+        } catch {
+            isMissionRecording = false
+            missionFeedbackMessage = "Could not evaluate mission response: \(error.localizedDescription)"
+        }
     }
 
     func startVocabularyPractice(maxNewCardsPerDay: Int = 5) {
@@ -474,6 +653,103 @@ final class VoiceSessionViewModel: ObservableObject {
     func refreshVocabularyPracticeStats(maxNewCardsPerDay: Int = 5) {
         vocabularyPracticeReviewedToday = vocabularyStore.reviewedCount(on: Date())
         vocabularyPracticeDueCount = vocabularyStore.buildPracticeQueue(maxNewCardsPerDay: maxNewCardsPerDay).count
+    }
+
+    private func updateShadowingPrompt(for item: VocabularyItem) {
+        let prompt = item.correctedSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        shadowingPromptText = prompt.isEmpty ? item.phrase : prompt
+    }
+
+    private func normalizeForMatching(_ text: String) -> String {
+        text
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet.whitespaces).inverted)
+            .joined(separator: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func tokenSet(_ text: String) -> Set<String> {
+        Set(
+            normalizeForMatching(text)
+                .split(separator: " ")
+                .map(String.init)
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    private func evaluateShadowingAttempt(
+        transcript: String,
+        promptText: String,
+        requiredPhrase: String
+    ) -> (score: Int, feedback: String) {
+        let normalizedTranscript = normalizeForMatching(transcript)
+        let normalizedPrompt = normalizeForMatching(promptText)
+        let normalizedPhrase = normalizeForMatching(requiredPhrase)
+
+        guard !normalizedTranscript.isEmpty else {
+            return (0, "I couldn’t detect clear speech. Try again and speak a little louder.")
+        }
+
+        let phraseCovered = !normalizedPhrase.isEmpty && normalizedTranscript.contains(normalizedPhrase)
+
+        let transcriptTokens = tokenSet(normalizedTranscript)
+        let promptTokens = tokenSet(normalizedPrompt)
+        let overlap = transcriptTokens.intersection(promptTokens).count
+        let similarity = promptTokens.isEmpty ? 0 : Double(overlap) / Double(promptTokens.count)
+
+        let score = min(100, Int((phraseCovered ? 60.0 : 0.0) + (similarity * 40.0)))
+
+        if score >= 85 {
+            return (score, "Excellent — very close to the prompt and strong phrase usage.")
+        }
+
+        if score >= 65 {
+            return (score, phraseCovered
+                ? "Good attempt. Keep the rhythm smoother and match the sentence more closely."
+                : "Nice flow, but make sure to include the target phrase exactly.")
+        }
+
+        return (score, phraseCovered
+            ? "You included the phrase. Next, shadow the full sentence more closely."
+            : "Try again: include the target phrase and follow the prompt wording.")
+    }
+
+    private func evaluateMissionAttempt(transcript: String, mission: SpeakingMission) -> (covered: Int, feedback: String) {
+        let normalizedTranscript = normalizeForMatching(transcript)
+        if normalizedTranscript.isEmpty {
+            return (0, "I couldn’t detect enough speech. Please try again.")
+        }
+
+        let required = mission.requiredPhrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let coveredPhrases = required.filter { phrase in
+            normalizedTranscript.contains(normalizeForMatching(phrase))
+        }
+
+        let wordCount = normalizedTranscript.split(separator: " ").count
+        let fluencyHint: String
+        if wordCount < 10 {
+            fluencyHint = "Speak a bit longer to build fluency (aim 20+ words)."
+        } else if wordCount < 20 {
+            fluencyHint = "Good length. Try one more sentence for richer context."
+        } else {
+            fluencyHint = "Great response length and flow."
+        }
+
+        let missed = required.filter { !coveredPhrases.contains($0) }
+        let coverageText = "Used \(coveredPhrases.count)/\(required.count) required phrases."
+
+        if missed.isEmpty {
+            return (coveredPhrases.count, "\(coverageText) Excellent mission completion. \(fluencyHint)")
+        }
+
+        return (
+            coveredPhrases.count,
+            "\(coverageText) Missed: \(missed.joined(separator: ", ")). \(fluencyHint)"
+        )
     }
 
     private func advanceVocabularyPracticeQueue(maxNewCardsPerDay: Int = 5) {

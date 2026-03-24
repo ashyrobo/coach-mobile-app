@@ -408,6 +408,72 @@ async function generateVocabularyExamples(phrase) {
     .slice(0, 6);
 }
 
+async function generateSpeakingMission(phrases) {
+  const cleanPhrases = Array.isArray(phrases)
+    ? phrases
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+
+  if (cleanPhrases.length === 0) {
+    return {
+      prompt: "Describe your day in 3 to 4 sentences.",
+      required_phrases: [],
+      sample_answer: "Today I focused on learning English and reviewing my notes from yesterday."
+    };
+  }
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "prompt": "string",\n  "required_phrases": ["string"],\n  "sample_answer": "string"\n}\nRules:\n- prompt should ask for a 20-40 second spoken response\n- required_phrases must include exactly the provided phrases\n- sample_answer should naturally use all required_phrases in concise spoken-style English`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.35,
+      messages: [
+        {
+          role: "system",
+          content: "You are an English speaking coach. Output only valid JSON in the requested shape."
+        },
+        {
+          role: "user",
+          content: `Required phrases:\n- ${cleanPhrases.join("\n- ")}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI speaking mission generation failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Could not parse speaking mission JSON from model response.");
+  }
+
+  const prompt = String(parsed.prompt || "").trim();
+  const sampleAnswer = String(parsed.sample_answer || "").trim();
+  const requiredPhrases = Array.isArray(parsed.required_phrases)
+    ? parsed.required_phrases.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    prompt: prompt || `In 20 to 40 seconds, answer naturally using these phrases: ${cleanPhrases.join(", ")}.`,
+    required_phrases: requiredPhrases.length > 0 ? requiredPhrases : cleanPhrases,
+    sample_answer: sampleAnswer || null
+  };
+}
+
 function sanitizeSessionTitle(rawTitle, transcriptFallback) {
   const normalized = String(rawTitle || "")
     .replace(/[\r\n]+/g, " ")
@@ -721,6 +787,29 @@ const server = createServer(async (req, res) => {
     } catch (error) {
       return sendJson(res, 500, {
         error: error instanceof Error ? error.message : "Failed to generate vocabulary examples"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/vocabulary/speaking-mission") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const phrases = Array.isArray(payload?.phrases) ? payload.phrases : [];
+      if (!phrases.length) {
+        return sendJson(res, 400, { error: "phrases array is required" });
+      }
+
+      const mission = await generateSpeakingMission(phrases);
+      return sendJson(res, 200, { mission });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to generate speaking mission"
       });
     }
   }

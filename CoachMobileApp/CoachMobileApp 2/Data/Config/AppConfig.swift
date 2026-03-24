@@ -71,4 +71,11 @@ enum AppConfig {
             .appendingPathComponent("vocabulary")
             .appendingPathComponent("cloud")
     }
+
+    static var speakingMissionURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("vocabulary")
+            .appendingPathComponent("speaking-mission")
+    }
 }

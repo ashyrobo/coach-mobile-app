@@ -6,6 +6,14 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         let items: [VocabularyItem]
     }
 
+    private struct SpeakingMissionRequest: Codable {
+        let phrases: [String]
+    }
+
+    private struct SpeakingMissionResponse: Codable {
+        let mission: SpeakingMission
+    }
+
     func processAudio(at audioURL: URL, mode: RewriteMode) async throws -> RewriteResult {
         let endpoint = AppConfig.voiceProcessingBaseURL
             .appendingPathComponent("v1")
@@ -65,6 +73,11 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         }
     }
 
+    func transcribePracticeAudio(at audioURL: URL) async throws -> String {
+        let extraction = try await extractVocabularyFromAudio(at: audioURL)
+        return extraction.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func generateVocabularyExamples(for phrase: String) async throws -> [String] {
         var request = URLRequest(url: AppConfig.vocabularyExamplesURL)
         request.httpMethod = "POST"
@@ -83,6 +96,31 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
             let payload = try JSONDecoder().decode(VocabularyExamplesResponse.self, from: data)
             return payload.examples.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func generateSpeakingMission(from phrases: [String]) async throws -> SpeakingMission {
+        var request = URLRequest(url: AppConfig.speakingMissionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let cleanPhrases = phrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        request.httpBody = try JSONEncoder().encode(SpeakingMissionRequest(phrases: cleanPhrases))
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(SpeakingMissionResponse.self, from: data)
+            return payload.mission
         } catch let error as AppError {
             throw error
         } catch {

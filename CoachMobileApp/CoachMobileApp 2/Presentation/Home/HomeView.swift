@@ -66,6 +66,15 @@ private struct VocabularyView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
 
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        shadowingSection
+                        speakingMissionSection
+                    }
+                    .padding(.horizontal)
+                }
+                .frame(maxHeight: 330)
+
                 if viewModel.isVocabularyPracticeActive {
                     vocabularyPracticeView
                 } else {
@@ -96,56 +105,204 @@ private struct VocabularyView: View {
                     }
                 }
             }
-            .navigationTitle("Vocabulary")
-            .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 viewModel.refreshVocabularyPracticeStats(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        if viewModel.isVocabularyPracticeActive {
-                            viewModel.endVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
-                        } else {
-                            viewModel.startVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Button {
+                            if viewModel.isVocabularyPracticeActive {
+                                viewModel.endVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                            } else {
+                                viewModel.startVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                            }
+                        } label: {
+                            Label(
+                                viewModel.isVocabularyPracticeActive ? "End Practice" : "Start Practice",
+                                systemImage: viewModel.isVocabularyPracticeActive ? "xmark.circle.fill" : "play.circle.fill"
+                            )
+                            .frame(maxWidth: .infinity)
                         }
-                    } label: {
-                        Label(
-                            viewModel.isVocabularyPracticeActive ? "End Practice" : "Start Practice",
-                            systemImage: viewModel.isVocabularyPracticeActive ? "xmark.circle.fill" : "play.circle.fill"
-                        )
-                    }
-                    .disabled(vocabularyStore.items.isEmpty)
-                }
+                        .buttonStyle(.bordered)
+                        .disabled(vocabularyStore.items.isEmpty)
 
-                ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Task {
+                                if viewModel.isVocabularyVoiceRecording {
+                                    await viewModel.stopVocabularyVoiceCaptureAndSave()
+                                } else {
+                                    await viewModel.startVocabularyVoiceCapture()
+                                }
+                            }
+                        } label: {
+                            Label(
+                                viewModel.isVocabularyVoiceRecording ? "Stop Voice" : "Voice Add",
+                                systemImage: viewModel.isVocabularyVoiceRecording ? "stop.circle.fill" : "mic.circle.fill"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(viewModel.isVocabularyVoiceRecording ? .red : .blue)
+                        .accessibilityLabel(viewModel.isVocabularyVoiceRecording ? "Stop voice add" : "Start voice add")
+                    }
+                    .padding(.horizontal)
+
+                    if !viewModel.vocabularyVoiceStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(viewModel.vocabularyVoiceStatusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var shadowingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Shadowing Practice", systemImage: "waveform.and.mic")
+                .font(.headline)
+
+            if let item = viewModel.shadowingItem {
+                Text("Target phrase: \(item.phrase)")
+                    .font(.subheadline.weight(.semibold))
+
+                Text(viewModel.shadowingPromptText)
+                    .font(.subheadline)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                HStack(spacing: 10) {
+                    Button {
+                        viewModel.playShadowingPrompt()
+                    } label: {
+                        Label("Play Prompt", systemImage: "play.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
                     Button {
                         Task {
-                            if viewModel.isVocabularyVoiceRecording {
-                                await viewModel.stopVocabularyVoiceCaptureAndSave()
+                            if viewModel.isShadowingRecording {
+                                await viewModel.stopShadowingCaptureAndEvaluate()
                             } else {
-                                await viewModel.startVocabularyVoiceCapture()
+                                await viewModel.startShadowingCapture()
                             }
                         }
                     } label: {
-                        Image(systemName: viewModel.isVocabularyVoiceRecording ? "stop.circle.fill" : "mic.circle.fill")
+                        Label(viewModel.isShadowingRecording ? "Stop" : "Speak", systemImage: viewModel.isShadowingRecording ? "stop.circle.fill" : "mic.circle.fill")
+                            .frame(maxWidth: .infinity)
                     }
-                    .tint(viewModel.isVocabularyVoiceRecording ? .red : .blue)
-                    .accessibilityLabel(viewModel.isVocabularyVoiceRecording ? "Stop voice add" : "Start voice add")
+                    .buttonStyle(.borderedProminent)
+                    .tint(viewModel.isShadowingRecording ? .red : .blue)
+
+                    Button {
+                        viewModel.cycleShadowingItem()
+                    } label: {
+                        Label("Next", systemImage: "arrow.right.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                if !viewModel.vocabularyVoiceStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(viewModel.vocabularyVoiceStatusMessage)
+
+                if !viewModel.shadowingTranscript.isEmpty {
+                    Text("You said: \(viewModel.shadowingTranscript)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .background(.thinMaterial)
                 }
+
+                if !viewModel.shadowingFeedbackMessage.isEmpty {
+                    Text("Score: \(viewModel.shadowingScore)/100 • \(viewModel.shadowingFeedbackMessage)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Add vocabulary items first to start shadowing.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear {
+            viewModel.refreshShadowingCandidate()
+        }
+    }
+
+    @ViewBuilder
+    private var speakingMissionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Context Speaking Mission", systemImage: "target")
+                .font(.headline)
+
+            Button {
+                Task { await viewModel.generateContextSpeakingMission() }
+            } label: {
+                Label(viewModel.isGeneratingSpeakingMission ? "Generating..." : "Generate Mission", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isGeneratingSpeakingMission)
+
+            if let mission = viewModel.currentSpeakingMission {
+                Text(mission.prompt)
+                    .font(.subheadline)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.tertiarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                if !mission.requiredPhrases.isEmpty {
+                    Text("Required: \(mission.requiredPhrases.joined(separator: ", "))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        Task {
+                            if viewModel.isMissionRecording {
+                                await viewModel.stopMissionCaptureAndEvaluate()
+                            } else {
+                                await viewModel.startMissionCapture()
+                            }
+                        }
+                    } label: {
+                        Label(viewModel.isMissionRecording ? "Stop Mission" : "Start Mission", systemImage: viewModel.isMissionRecording ? "stop.circle.fill" : "mic.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(viewModel.isMissionRecording ? .red : .green)
+                }
+
+                if !viewModel.missionTranscript.isEmpty {
+                    Text("You said: \(viewModel.missionTranscript)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !viewModel.missionFeedbackMessage.isEmpty {
+                    Text("Coverage: \(viewModel.missionCoverageCount)/\(viewModel.missionCoverageTotal) • \(viewModel.missionFeedbackMessage)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text(viewModel.missionFeedbackMessage.isEmpty ? "Generate a mission to practice multiple phrases in one response." : viewModel.missionFeedbackMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder
