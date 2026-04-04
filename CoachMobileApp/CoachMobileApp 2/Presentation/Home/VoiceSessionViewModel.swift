@@ -32,6 +32,7 @@ final class VoiceSessionViewModel: ObservableObject {
         }
     }
     @Published var selectedMode: RewriteMode = .summarize
+    @Published var selectedRewriteTone: RewriteTone = .professional
     @Published var statusMessage: String = "Ready to record"
     @Published var transcript: String = ""
     @Published var finalText: String = ""
@@ -205,7 +206,8 @@ final class VoiceSessionViewModel: ObservableObject {
 
         statusMessage = "Processing..."
         do {
-            let result = try await processVoiceSessionUseCase.execute(audioURL: audioURL, mode: selectedMode)
+            let tone = selectedMode == .rewordBetter ? selectedRewriteTone : nil
+            let result = try await processVoiceSessionUseCase.execute(audioURL: audioURL, mode: selectedMode, tone: tone)
             let savedAudioURL = try historyStore.persistRecording(from: audioURL)
             let session = VoiceSession(
                 audioPath: savedAudioURL.path,

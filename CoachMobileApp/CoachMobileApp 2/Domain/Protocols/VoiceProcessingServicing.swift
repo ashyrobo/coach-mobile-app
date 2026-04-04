@@ -1,7 +1,7 @@
 import Foundation
 
 protocol VoiceProcessingServicing {
-    func processAudio(at audioURL: URL, mode: RewriteMode) async throws -> RewriteResult
+    func processAudio(at audioURL: URL, mode: RewriteMode, tone: RewriteTone?) async throws -> RewriteResult
     func extractVocabularyFromAudio(at audioURL: URL) async throws -> VocabularyExtractionResult
     func transcribePracticeAudio(at audioURL: URL) async throws -> String
     func generateVocabularyExamples(for phrase: String) async throws -> [String]

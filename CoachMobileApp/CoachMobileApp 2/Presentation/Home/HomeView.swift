@@ -1074,12 +1074,26 @@ private struct RecordView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    if viewModel.selectedMode == .rewordBetter {
+                        HStack {
+                            Text("Tone")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Picker("Tone", selection: $viewModel.selectedRewriteTone) {
+                                ForEach(RewriteTone.allCases) { tone in
+                                    Text(tone.displayTitle).tag(tone)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+
                     Text(viewModel.statusMessage)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
 
-                    Text("Transcription Method: \(viewModel.transcriptionMethod.displayTitle)")
+                    Text("Processing Path: \(viewModel.transcriptionMethod.displayTitle)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 

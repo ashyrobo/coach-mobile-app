@@ -1,5 +1,25 @@
 import Foundation
 
+enum RewriteTone: String, CaseIterable, Identifiable, Codable {
+    case professional
+    case casual
+    case friendly
+    case confident
+    case polite
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .professional: return "Professional"
+        case .casual: return "Casual"
+        case .friendly: return "Friendly"
+        case .confident: return "Confident"
+        case .polite: return "Polite"
+        }
+    }
+}
+
 enum RewriteMode: String, CaseIterable, Identifiable, Codable {
     case summarize
     case rewordBetter

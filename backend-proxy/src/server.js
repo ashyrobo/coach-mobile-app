@@ -151,10 +151,32 @@ function tipsCountForMode(mode) {
   return 4;
 }
 
-function promptForMode(mode) {
+function normalizeRewriteTone(rawTone) {
+  const allowed = new Set(["professional", "casual", "friendly", "confident", "polite"]);
+  const normalized = String(rawTone || "professional").trim().toLowerCase();
+  return allowed.has(normalized) ? normalized : "professional";
+}
+
+function promptForTone(tone) {
+  switch (tone) {
+    case "casual":
+      return "Use relaxed, everyday natural language while keeping grammar correct.";
+    case "friendly":
+      return "Use warm, approachable, and supportive language.";
+    case "confident":
+      return "Use direct and assertive wording without sounding rude.";
+    case "polite":
+      return "Use respectful and courteous phrasing.";
+    case "professional":
+    default:
+      return "Use polished, business-appropriate wording.";
+  }
+}
+
+function promptForMode(mode, tone) {
   switch (mode) {
     case "rewordBetter":
-      return "Improve fluency and professionalism while preserving intent. Keep it natural and concise.";
+      return `Improve fluency while preserving intent. Keep it natural and concise. ${promptForTone(tone)}`;
     case "summarize":
     default:
       return "Summarize the key message into a short, high-signal sentence.";
@@ -238,9 +260,9 @@ async function transcribeAudio(audioFile) {
   return payload?.text?.trim() || "";
 }
 
-async function rewriteAndCoach({ mode, transcript }) {
+async function rewriteAndCoach({ mode, transcript, tone }) {
   const tipCount = tipsCountForMode(mode);
-  const modeInstruction = promptForMode(mode);
+  const modeInstruction = promptForMode(mode, tone);
   const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "title": "string",\n  "final_text": "string",\n  "tips": ["string"],\n  "grammar_fixes": ["string"]\n}\nRules:\n- title must be 1 to 3 words, high-signal, and reflect the core session topic\n- do not use quotes or punctuation-only titles\n- tips length: 2 to ${tipCount}\n- each tip concise and actionable\n- grammar_fixes can be empty array`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -859,6 +881,7 @@ const server = createServer(async (req, res) => {
 
     const parsed = parseMultipart(body, boundaryMatch[1]);
     const mode = typeof parsed.mode === "string" ? parsed.mode : "summarize";
+    const tone = normalizeRewriteTone(parsed.tone);
     const audio = parsed.audio;
 
     if (!audio || !audio.data || audio.data.length === 0) {
@@ -873,7 +896,7 @@ const server = createServer(async (req, res) => {
 
     try {
       const transcript = await transcribeAudio(audio);
-      const rewritten = await rewriteAndCoach({ mode, transcript });
+      const rewritten = await rewriteAndCoach({ mode, transcript, tone });
 
       return sendJson(res, 200, {
         title: rewritten.title,

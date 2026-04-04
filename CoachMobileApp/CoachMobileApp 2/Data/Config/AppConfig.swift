@@ -6,7 +6,7 @@ enum TranscriptionMethod: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 
     var displayTitle: String {
-        "Apple On-Device"
+        "Backend Proxy (OpenAI)"
     }
 }
 

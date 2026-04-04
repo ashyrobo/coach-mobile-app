@@ -36,7 +36,7 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         let evaluation: BehavioralEvaluation
     }
 
-    func processAudio(at audioURL: URL, mode: RewriteMode) async throws -> RewriteResult {
+    func processAudio(at audioURL: URL, mode: RewriteMode, tone: RewriteTone?) async throws -> RewriteResult {
         let endpoint = AppConfig.voiceProcessingBaseURL
             .appendingPathComponent("v1")
             .appendingPathComponent("process-audio")
@@ -52,6 +52,7 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
             audioData: audioData,
             audioFileName: audioURL.lastPathComponent,
             mode: mode.rawValue,
+            tone: tone?.rawValue,
             boundary: boundary
         )
 
@@ -238,6 +239,7 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         audioData: Data,
         audioFileName: String,
         mode: String,
+        tone: String?,
         boundary: String
     ) -> Data {
         var body = Data()
@@ -245,6 +247,12 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         body.append("--\(boundary)\r\n")
         body.append("Content-Disposition: form-data; name=\"mode\"\r\n\r\n")
         body.append("\(mode)\r\n")
+
+        if let tone, !tone.isEmpty {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"tone\"\r\n\r\n")
+            body.append("\(tone)\r\n")
+        }
 
         body.append("--\(boundary)\r\n")
         body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"\(audioFileName)\"\r\n")
