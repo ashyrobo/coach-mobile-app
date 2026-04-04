@@ -78,4 +78,20 @@ enum AppConfig {
             .appendingPathComponent("vocabulary")
             .appendingPathComponent("speaking-mission")
     }
+
+    static var behavioralQuestionURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("interview")
+            .appendingPathComponent("behavioral")
+            .appendingPathComponent("question")
+    }
+
+    static var behavioralEvaluationURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("interview")
+            .appendingPathComponent("behavioral")
+            .appendingPathComponent("evaluate")
+    }
 }

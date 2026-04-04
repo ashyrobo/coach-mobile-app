@@ -18,6 +18,11 @@ struct HomeView: View {
                     Label("Vocabulary", systemImage: "text.book.closed.fill")
                 }
 
+            PracticeView(viewModel: viewModel)
+                .tabItem {
+                    Label("Practice", systemImage: "figure.mind.and.body")
+                }
+
             HistoryView(historyStore: viewModel.historyStore)
             .tabItem {
                 Label("History", systemImage: "clock.arrow.circlepath")
@@ -31,135 +36,140 @@ struct HomeView: View {
     }
 }
 
-private struct VocabularyView: View {
+private struct PracticeView: View {
     @ObservedObject var viewModel: VoiceSessionViewModel
-    private let practiceMaxNewCardsPerDay = 5
-    private let recencyCalendar = Calendar.current
-    private let columns: [GridItem] = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
-    ]
-
-    private var vocabularyStore: VocabularyStore { viewModel.vocabularyStore }
-
-    private var wordItems: [VocabularyItem] {
-        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .word }
-    }
-
-    private var phraseItems: [VocabularyItem] {
-        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .phrase }
-    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 14) {
-                        Label("Due: \(viewModel.vocabularyPracticeDueCount)", systemImage: "calendar.badge.clock")
-                        Label("Reviewed today: \(viewModel.vocabularyPracticeReviewedToday)", systemImage: "checkmark.circle")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    behavioralInterviewSection
+                    shadowingSection
+                    speakingMissionSection
+                }
+                .padding()
+            }
+            .navigationTitle("Practice")
+        }
+    }
+
+    @ViewBuilder
+    private var behavioralInterviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Behavioral Interview", systemImage: "person.2.wave.2")
+                .font(.headline)
+
+            Picker("Category", selection: $viewModel.selectedBehavioralCategory) {
+                ForEach(BehavioralQuestionCategory.allCases) { category in
+                    Text(category.displayTitle).tag(category)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Button {
+                Task { await viewModel.generateBehavioralQuestion() }
+            } label: {
+                Label(
+                    viewModel.isGeneratingBehavioralQuestion ? "Generating..." : "Generate Behavioral Question",
+                    systemImage: "sparkles"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isGeneratingBehavioralQuestion)
+
+            if let question = viewModel.currentBehavioralQuestion {
+                Text(question.prompt)
+                    .font(.subheadline)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.tertiarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                if !question.focus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Focus: \(question.focus)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    Task {
+                        if viewModel.isBehavioralAnswerRecording {
+                            await viewModel.stopBehavioralAnswerCaptureAndEvaluate()
+                        } else {
+                            await viewModel.startBehavioralAnswerCapture()
+                        }
                     }
-                    .font(.caption)
+                } label: {
+                    Label(
+                        viewModel.isBehavioralAnswerRecording ? "Stop Answer" : "Start Answer",
+                        systemImage: viewModel.isBehavioralAnswerRecording ? "stop.circle.fill" : "mic.circle.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(viewModel.isBehavioralAnswerRecording ? .red : .purple)
+                .disabled(viewModel.isEvaluatingBehavioralAnswer)
+            }
+
+            if !viewModel.behavioralStatusMessage.isEmpty {
+                Text(viewModel.behavioralStatusMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !viewModel.behavioralAnswerTranscript.isEmpty {
+                Text("You said: \(viewModel.behavioralAnswerTranscript)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let evaluation = viewModel.behavioralEvaluation {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(evaluation.summaryFeedback)
+                        .font(.subheadline)
+
+                    Text(
+                        "STAR: S \(evaluation.starCoverage.situation ? "✅" : "❌")  T \(evaluation.starCoverage.task ? "✅" : "❌")  A \(evaluation.starCoverage.action ? "✅" : "❌")  R \(evaluation.starCoverage.result ? "✅" : "❌")"
+                    )
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                    vocabularyStatusLegend
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
+                    Text(
+                        "Scores — Clarity \(evaluation.rubric.clarity)/5 • Ownership \(evaluation.rubric.ownership)/5 • Specificity \(evaluation.rubric.specificity)/5 • Impact \(evaluation.rubric.impact)/5 • Conciseness \(evaluation.rubric.conciseness)/5"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        shadowingSection
-                        speakingMissionSection
-                    }
-                    .padding(.horizontal)
-                }
-                .frame(maxHeight: 330)
-
-                if viewModel.isVocabularyPracticeActive {
-                    vocabularyPracticeView
-                } else {
-                    Group {
-                        if vocabularyStore.items.isEmpty {
-                            ContentUnavailableView(
-                                "No Vocabulary Yet",
-                                systemImage: "text.book.closed",
-                                description: Text(
-                                    "Add words or phrases from Word Improvements and they will show up here."
-                                )
-                            )
-                        } else {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    if !wordItems.isEmpty {
-                                        wordGridSection(items: wordItems)
-                                    }
-
-                                    if !phraseItems.isEmpty {
-                                        phraseListSection(items: phraseItems)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.vertical, 10)
-                            }
-                        }
-                    }
-                }
-            }
-            .onAppear {
-                viewModel.refreshVocabularyPracticeStats(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 8) {
-                    HStack(spacing: 12) {
-                        Button {
-                            if viewModel.isVocabularyPracticeActive {
-                                viewModel.endVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
-                            } else {
-                                viewModel.startVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
-                            }
-                        } label: {
-                            Label(
-                                viewModel.isVocabularyPracticeActive ? "End Practice" : "Start Practice",
-                                systemImage: viewModel.isVocabularyPracticeActive ? "xmark.circle.fill" : "play.circle.fill"
-                            )
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(vocabularyStore.items.isEmpty)
-
-                        Button {
-                            Task {
-                                if viewModel.isVocabularyVoiceRecording {
-                                    await viewModel.stopVocabularyVoiceCaptureAndSave()
-                                } else {
-                                    await viewModel.startVocabularyVoiceCapture()
-                                }
-                            }
-                        } label: {
-                            Label(
-                                viewModel.isVocabularyVoiceRecording ? "Stop Voice" : "Voice Add",
-                                systemImage: viewModel.isVocabularyVoiceRecording ? "stop.circle.fill" : "mic.circle.fill"
-                            )
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(viewModel.isVocabularyVoiceRecording ? .red : .blue)
-                        .accessibilityLabel(viewModel.isVocabularyVoiceRecording ? "Stop voice add" : "Start voice add")
-                    }
-                    .padding(.horizontal)
-
-                    if !viewModel.vocabularyVoiceStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(viewModel.vocabularyVoiceStatusMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    if !evaluation.improvedAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Improved Answer")
+                            .font(.subheadline.weight(.semibold))
+                        Text(evaluation.improvedAnswer)
+                            .font(.subheadline)
+                            .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal)
+                            .background(Color(.tertiarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    if !evaluation.followUpQuestions.isEmpty {
+                        Text("Follow-up Questions")
+                            .font(.subheadline.weight(.semibold))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(evaluation.followUpQuestions.enumerated()), id: \.offset) { index, followUp in
+                                Text("\(index + 1). \(followUp)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
-                .padding(.vertical, 8)
-                .background(.thinMaterial)
             }
         }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder
@@ -303,6 +313,129 @@ private struct VocabularyView: View {
         .padding(12)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct VocabularyView: View {
+    @ObservedObject var viewModel: VoiceSessionViewModel
+    private let practiceMaxNewCardsPerDay = 5
+    private let recencyCalendar = Calendar.current
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
+
+    private var vocabularyStore: VocabularyStore { viewModel.vocabularyStore }
+
+    private var wordItems: [VocabularyItem] {
+        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .word }
+    }
+
+    private var phraseItems: [VocabularyItem] {
+        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .phrase }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        Label("Due: \(viewModel.vocabularyPracticeDueCount)", systemImage: "calendar.badge.clock")
+                        Label("Reviewed today: \(viewModel.vocabularyPracticeReviewedToday)", systemImage: "checkmark.circle")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    vocabularyStatusLegend
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+
+                if viewModel.isVocabularyPracticeActive {
+                    vocabularyPracticeView
+                } else {
+                    Group {
+                        if vocabularyStore.items.isEmpty {
+                            ContentUnavailableView(
+                                "No Vocabulary Yet",
+                                systemImage: "text.book.closed",
+                                description: Text(
+                                    "Add words or phrases from Word Improvements and they will show up here."
+                                )
+                            )
+                        } else {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    if !wordItems.isEmpty {
+                                        wordGridSection(items: wordItems)
+                                    }
+
+                                    if !phraseItems.isEmpty {
+                                        phraseListSection(items: phraseItems)
+                                    }
+                                }
+                                .padding(.horizontal)
+                                .padding(.vertical, 10)
+                            }
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                viewModel.refreshVocabularyPracticeStats(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Button {
+                            if viewModel.isVocabularyPracticeActive {
+                                viewModel.endVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                            } else {
+                                viewModel.startVocabularyPractice(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+                            }
+                        } label: {
+                            Label(
+                                viewModel.isVocabularyPracticeActive ? "End Practice" : "Start Practice",
+                                systemImage: viewModel.isVocabularyPracticeActive ? "xmark.circle.fill" : "play.circle.fill"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(vocabularyStore.items.isEmpty)
+
+                        Button {
+                            Task {
+                                if viewModel.isVocabularyVoiceRecording {
+                                    await viewModel.stopVocabularyVoiceCaptureAndSave()
+                                } else {
+                                    await viewModel.startVocabularyVoiceCapture()
+                                }
+                            }
+                        } label: {
+                            Label(
+                                viewModel.isVocabularyVoiceRecording ? "Stop Voice" : "Voice Add",
+                                systemImage: viewModel.isVocabularyVoiceRecording ? "stop.circle.fill" : "mic.circle.fill"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(viewModel.isVocabularyVoiceRecording ? .red : .blue)
+                        .accessibilityLabel(viewModel.isVocabularyVoiceRecording ? "Stop voice add" : "Start voice add")
+                    }
+                    .padding(.horizontal)
+
+                    if !viewModel.vocabularyVoiceStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(viewModel.vocabularyVoiceStatusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+            }
+        }
     }
 
     @ViewBuilder

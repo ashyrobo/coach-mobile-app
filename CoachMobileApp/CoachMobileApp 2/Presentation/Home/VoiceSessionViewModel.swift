@@ -61,6 +61,14 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var missionFeedbackMessage: String = ""
     @Published var missionCoverageCount: Int = 0
     @Published var missionCoverageTotal: Int = 0
+    @Published var selectedBehavioralCategory: BehavioralQuestionCategory = .mixed
+    @Published var currentBehavioralQuestion: BehavioralQuestion?
+    @Published var isGeneratingBehavioralQuestion: Bool = false
+    @Published var isBehavioralAnswerRecording: Bool = false
+    @Published var behavioralAnswerTranscript: String = ""
+    @Published var isEvaluatingBehavioralAnswer: Bool = false
+    @Published var behavioralEvaluation: BehavioralEvaluation?
+    @Published var behavioralStatusMessage: String = ""
 
     let historyStore: SessionHistoryStore
     let vocabularyStore: VocabularyStore
@@ -71,6 +79,7 @@ final class VoiceSessionViewModel: ObservableObject {
     private let voiceProcessingService: VoiceProcessingServicing
     private let vocabularyAudioRecorderService: AudioRecorderServicing
     private let speakingPracticeAudioRecorderService: AudioRecorderServicing
+    private let behavioralAudioRecorderService: AudioRecorderServicing
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
@@ -89,6 +98,7 @@ final class VoiceSessionViewModel: ObservableObject {
         self.voiceProcessingService = voiceProcessingService
         self.vocabularyAudioRecorderService = AudioRecorderService()
         self.speakingPracticeAudioRecorderService = AudioRecorderService()
+        self.behavioralAudioRecorderService = AudioRecorderService()
         self.processVoiceSessionUseCase = ProcessVoiceSessionUseCase(voiceProcessingService: voiceProcessingService)
         applyTranscriptionMethodSelection()
         hydrateVocabularyExamplesCache()
@@ -567,6 +577,73 @@ final class VoiceSessionViewModel: ObservableObject {
             missionFeedbackMessage = "Mission ready. Speak for about 20–40 seconds."
         } catch {
             missionFeedbackMessage = "Could not generate mission: \(error.localizedDescription)"
+        }
+    }
+
+    func generateBehavioralQuestion() async {
+        isGeneratingBehavioralQuestion = true
+        defer { isGeneratingBehavioralQuestion = false }
+
+        do {
+            let question = try await voiceProcessingService.generateBehavioralQuestion(category: selectedBehavioralCategory)
+            currentBehavioralQuestion = question
+            behavioralAnswerTranscript = ""
+            behavioralEvaluation = nil
+            behavioralStatusMessage = "Question ready. Answer in 45–90 seconds."
+        } catch {
+            behavioralStatusMessage = "Could not generate question: \(error.localizedDescription)"
+        }
+    }
+
+    func startBehavioralAnswerCapture() async {
+        do {
+            guard !isBehavioralAnswerRecording else { return }
+            guard currentBehavioralQuestion != nil else {
+                behavioralStatusMessage = "Generate a behavioral question first."
+                return
+            }
+
+            try await requestRequiredPermissions()
+            try await behavioralAudioRecorderService.startRecording()
+
+            isBehavioralAnswerRecording = true
+            behavioralStatusMessage = "Listening... use STAR structure in your answer."
+        } catch {
+            isBehavioralAnswerRecording = false
+            behavioralStatusMessage = error.localizedDescription
+        }
+    }
+
+    func stopBehavioralAnswerCaptureAndEvaluate() async {
+        guard isBehavioralAnswerRecording else { return }
+
+        do {
+            let audioURL = try await behavioralAudioRecorderService.stopRecording()
+            isBehavioralAnswerRecording = false
+            isEvaluatingBehavioralAnswer = true
+            behavioralStatusMessage = "Evaluating your behavioral answer..."
+
+            let transcript = try await voiceProcessingService.transcribePracticeAudio(at: audioURL)
+            behavioralAnswerTranscript = transcript
+
+            guard let question = currentBehavioralQuestion else {
+                behavioralStatusMessage = "Question context missing. Please generate again."
+                isEvaluatingBehavioralAnswer = false
+                return
+            }
+
+            let evaluation = try await voiceProcessingService.evaluateBehavioralAnswer(
+                question: question,
+                answerTranscript: transcript
+            )
+
+            behavioralEvaluation = evaluation
+            behavioralStatusMessage = "Evaluation complete. Review STAR gaps and refine your answer."
+            isEvaluatingBehavioralAnswer = false
+        } catch {
+            isBehavioralAnswerRecording = false
+            isEvaluatingBehavioralAnswer = false
+            behavioralStatusMessage = "Could not evaluate behavioral answer: \(error.localizedDescription)"
         }
     }
 

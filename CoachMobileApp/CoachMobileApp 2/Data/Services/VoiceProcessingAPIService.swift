@@ -14,6 +14,28 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         let mission: SpeakingMission
     }
 
+    private struct BehavioralQuestionRequest: Codable {
+        let category: BehavioralQuestionCategory
+    }
+
+    private struct BehavioralQuestionResponse: Codable {
+        let question: BehavioralQuestion
+    }
+
+    private struct BehavioralEvaluationRequest: Codable {
+        let question: BehavioralQuestion
+        let answerTranscript: String
+
+        enum CodingKeys: String, CodingKey {
+            case question
+            case answerTranscript = "answer_transcript"
+        }
+    }
+
+    private struct BehavioralEvaluationResponse: Codable {
+        let evaluation: BehavioralEvaluation
+    }
+
     func processAudio(at audioURL: URL, mode: RewriteMode) async throws -> RewriteResult {
         let endpoint = AppConfig.voiceProcessingBaseURL
             .appendingPathComponent("v1")
@@ -121,6 +143,52 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
             let payload = try JSONDecoder().decode(SpeakingMissionResponse.self, from: data)
             return payload.mission
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func generateBehavioralQuestion(category: BehavioralQuestionCategory) async throws -> BehavioralQuestion {
+        var request = URLRequest(url: AppConfig.behavioralQuestionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(BehavioralQuestionRequest(category: category))
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(BehavioralQuestionResponse.self, from: data)
+            return payload.question
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func evaluateBehavioralAnswer(question: BehavioralQuestion, answerTranscript: String) async throws -> BehavioralEvaluation {
+        var request = URLRequest(url: AppConfig.behavioralEvaluationURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let cleanAnswer = answerTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        request.httpBody = try JSONEncoder().encode(
+            BehavioralEvaluationRequest(question: question, answerTranscript: cleanAnswer)
+        )
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(BehavioralEvaluationResponse.self, from: data)
+            return payload.evaluation
         } catch let error as AppError {
             throw error
         } catch {

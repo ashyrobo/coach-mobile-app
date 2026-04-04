@@ -474,6 +474,172 @@ async function generateSpeakingMission(phrases) {
   };
 }
 
+function normalizeBehavioralCategory(rawCategory) {
+  const allowed = new Set(["mixed", "leadership", "conflict", "failure", "ownership", "teamwork", "ambiguity", "impact"]);
+  const normalized = String(rawCategory || "mixed").trim().toLowerCase();
+  return allowed.has(normalized) ? normalized : "mixed";
+}
+
+async function generateBehavioralQuestion(category) {
+  const normalizedCategory = normalizeBehavioralCategory(category);
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "prompt": "string",\n  "category": "mixed|leadership|conflict|failure|ownership|teamwork|ambiguity|impact",\n  "focus": "string"\n}\nRules:\n- prompt must be a realistic behavioral interview question for the specified category\n- focus should be a concise coaching hint (max 12 words)\n- category in output must match requested category unless requested category is mixed`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.45,
+      messages: [
+        {
+          role: "system",
+          content: "You are a behavioral interview coach. Output only valid JSON in the requested shape."
+        },
+        {
+          role: "user",
+          content: `Requested category: ${normalizedCategory}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI behavioral question generation failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Could not parse behavioral question JSON from model response.");
+  }
+
+  const prompt = String(parsed.prompt || "").trim();
+  const modelCategory = normalizeBehavioralCategory(parsed.category);
+  const focus = String(parsed.focus || "").trim();
+
+  return {
+    prompt: prompt || "Tell me about a time you handled a difficult teammate.",
+    category: normalizedCategory === "mixed" ? modelCategory : normalizedCategory,
+    focus: focus || "Use STAR and include measurable impact."
+  };
+}
+
+async function evaluateBehavioralAnswer(question, answerTranscript) {
+  const cleanPrompt = String(question?.prompt || "").trim();
+  const cleanCategory = normalizeBehavioralCategory(question?.category);
+  const cleanFocus = String(question?.focus || "").trim();
+  const cleanAnswer = String(answerTranscript || "").trim();
+
+  if (!cleanAnswer) {
+    return {
+      summary_feedback: "I couldn't detect enough answer content. Try again and speak in complete STAR sentences.",
+      star_coverage: {
+        situation: false,
+        task: false,
+        action: false,
+        result: false
+      },
+      rubric: {
+        clarity: 1,
+        ownership: 1,
+        specificity: 1,
+        impact: 1,
+        conciseness: 1
+      },
+      improved_answer: "In my previous role, I faced [situation], my goal was [task], I took [actions], and the result was [quantified impact].",
+      follow_up_questions: [
+        "How did you measure success?",
+        "What would you do differently next time?"
+      ]
+    };
+  }
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "summary_feedback": "string",\n  "star_coverage": { "situation": true, "task": true, "action": true, "result": true },\n  "rubric": { "clarity": 1, "ownership": 1, "specificity": 1, "impact": 1, "conciseness": 1 },\n  "improved_answer": "string",\n  "follow_up_questions": ["string"]\n}\nRules:\n- rubric values must be integers from 1 to 5\n- follow_up_questions should have 2 to 3 realistic interviewer follow-ups\n- improved_answer must be concise and interview-ready, using STAR flow\n- be constructive and specific`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: "You are a senior behavioral interview coach. Output only valid JSON in the requested shape."
+        },
+        {
+          role: "user",
+          content: `Question category: ${cleanCategory}\nQuestion focus: ${cleanFocus}\nQuestion prompt: ${cleanPrompt}\n\nCandidate answer transcript:\n${cleanAnswer}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI behavioral evaluation failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Could not parse behavioral evaluation JSON from model response.");
+  }
+
+  const summaryFeedback = String(parsed.summary_feedback || "").trim();
+  const star = parsed.star_coverage && typeof parsed.star_coverage === "object" ? parsed.star_coverage : {};
+  const rubric = parsed.rubric && typeof parsed.rubric === "object" ? parsed.rubric : {};
+  const improvedAnswer = String(parsed.improved_answer || "").trim();
+  const followUpQuestions = Array.isArray(parsed.follow_up_questions)
+    ? parsed.follow_up_questions.map((q) => String(q || "").trim()).filter(Boolean).slice(0, 3)
+    : [];
+
+  const score = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 3;
+    return Math.max(1, Math.min(5, Math.round(numeric)));
+  };
+
+  return {
+    summary_feedback: summaryFeedback || "Solid attempt. Improve structure with clearer STAR progression.",
+    star_coverage: {
+      situation: Boolean(star.situation),
+      task: Boolean(star.task),
+      action: Boolean(star.action),
+      result: Boolean(star.result)
+    },
+    rubric: {
+      clarity: score(rubric.clarity),
+      ownership: score(rubric.ownership),
+      specificity: score(rubric.specificity),
+      impact: score(rubric.impact),
+      conciseness: score(rubric.conciseness)
+    },
+    improved_answer:
+      improvedAnswer ||
+      "In my previous role, I addressed a key challenge by clarifying goals, coordinating stakeholders, and delivering a measurable improvement.",
+    follow_up_questions:
+      followUpQuestions.length > 0
+        ? followUpQuestions
+        : [
+            "How did you prioritize your actions?",
+            "What metric best demonstrated impact?"
+          ]
+  };
+}
+
 function sanitizeSessionTitle(rawTitle, transcriptFallback) {
   const normalized = String(rawTitle || "")
     .replace(/[\r\n]+/g, " ")
@@ -810,6 +976,54 @@ const server = createServer(async (req, res) => {
     } catch (error) {
       return sendJson(res, 500, {
         error: error instanceof Error ? error.message : "Failed to generate speaking mission"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/interview/behavioral/question") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const category = normalizeBehavioralCategory(payload?.category);
+      const question = await generateBehavioralQuestion(category);
+      return sendJson(res, 200, { question });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to generate behavioral question"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/interview/behavioral/evaluate") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const question = payload?.question && typeof payload.question === "object" ? payload.question : null;
+      const answerTranscript = String(payload?.answer_transcript || "").trim();
+
+      if (!question || !String(question.prompt || "").trim()) {
+        return sendJson(res, 400, { error: "question object with prompt is required" });
+      }
+
+      if (!answerTranscript) {
+        return sendJson(res, 400, { error: "answer_transcript is required" });
+      }
+
+      const evaluation = await evaluateBehavioralAnswer(question, answerTranscript);
+      return sendJson(res, 200, { evaluation });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to evaluate behavioral answer"
       });
     }
   }
