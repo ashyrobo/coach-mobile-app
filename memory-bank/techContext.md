@@ -40,6 +40,7 @@
 - `POST /v1/vocabulary/extract-from-audio`
 - `POST /v1/vocabulary/examples`
 - `POST /v1/vocabulary/speaking-mission`
+- `POST /v1/practice/shadowing-prompt-with-audio`
 
 ### Interview Practice
 - `POST /v1/interview/behavioral/question`
@@ -60,3 +61,4 @@
 1. Clarify naming/semantics around transcription method selection versus actual runtime behavior.
 2. Duplicate iOS source trees still exist in repo and should be further consolidated/documented.
 3. Automated test coverage remains limited for ViewModel logic and backend contract checks.
+4. Shadowing audio cache lifecycle management is currently basic (no advanced eviction policy/UI yet).

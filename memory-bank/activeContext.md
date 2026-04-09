@@ -17,6 +17,14 @@ Consolidate the project into a stable post-MVP baseline with reliable daily-use 
 - App should be usable from phone against deployed backend (not localhost-only).
 - Backend-proxy architecture remains primary for key safety.
 
+## Recent Significant Change (Practice TTS)
+- Added combined shadowing generation + neural TTS flow for Practice tab.
+- Backend now supports `POST /v1/practice/shadowing-prompt-with-audio`.
+- iOS now requests paragraph + audio together, caches returned audio locally, and plays cached audio first.
+- Fallback behavior remains intact:
+  - If cloud TTS fails, paragraph-only flow still works.
+  - Local `AVSpeechSynthesizer` playback still works as backup.
+
 ## Confirmed Current Feature Set
 - Realtime feature set is removed from active iOS and backend paths.
 - Main app tabs: `Record`, `Vocabulary`, `Practice`, `History`, `Settings`.

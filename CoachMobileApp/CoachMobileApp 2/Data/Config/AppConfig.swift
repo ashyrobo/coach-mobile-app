@@ -86,6 +86,34 @@ enum AppConfig {
             .appendingPathComponent("shadowing-paragraph")
     }
 
+    static var shadowingPromptWithAudioURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("practice")
+            .appendingPathComponent("shadowing-prompt-with-audio")
+    }
+
+    static var shadowingTTSVoice: String {
+        let envValue = ProcessInfo.processInfo.environment["SHADOWING_TTS_VOICE"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (envValue?.isEmpty == false ? envValue : nil) ?? "alloy"
+    }
+
+    static var shadowingTTSFormat: String {
+        let envValue = ProcessInfo.processInfo.environment["SHADOWING_TTS_FORMAT"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return (envValue?.isEmpty == false ? envValue : nil) ?? "mp3"
+    }
+
+    static var shadowingTTSSpeed: Double {
+        let envValue = ProcessInfo.processInfo.environment["SHADOWING_TTS_SPEED"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let envValue,
+           let numeric = Double(envValue),
+           numeric.isFinite {
+            return min(2.0, max(0.25, numeric))
+        }
+
+        return 1.0
+    }
+
     static var behavioralQuestionURL: URL {
         voiceProcessingBaseURL
             .appendingPathComponent("v1")

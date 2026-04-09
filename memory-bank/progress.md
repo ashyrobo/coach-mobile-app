@@ -30,6 +30,7 @@ Project is in a stable post-MVP phase: the core voice rewrite flow is validated 
 
 ### Practice Features
 - Shadowing module with speech capture and scoring feedback.
+- Shadowing prompt generation now supports backend OpenAI TTS + local cached playback fallback path.
 - Speaking mission generation + completion feedback.
 - Behavioral interview module:
   - question generation by category
@@ -43,6 +44,7 @@ Project is in a stable post-MVP phase: the core voice rewrite flow is validated 
 ### Backend Proxy
 - Node backend proxy is active and provides rewrite, vocabulary, interview, and observability endpoints.
 - OpenAI integration in place for transcription and completion-based coaching tasks.
+- Added combined shadowing prompt + neural TTS endpoint: `POST /v1/practice/shadowing-prompt-with-audio`.
 
 ### Removed / Deprecated
 - Realtime streaming architecture and related iOS/backend wiring have been removed from active code paths.

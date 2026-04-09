@@ -22,7 +22,7 @@ enum VocabularyReviewRatingRecord: String, Codable {
 }
 
 @MainActor
-final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate {
+final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate, @preconcurrency AVAudioPlayerDelegate {
     enum RecordingState {
         case idle
         case recording
@@ -119,6 +119,8 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
     private static let vocabularyReminderMinuteKey = "vocabulary-reminder-minute"
     private static let vocabularyReminderNotificationID = "vocabulary-daily-reminder"
     private let speechSynthesizer = AVSpeechSynthesizer()
+    private var shadowingPromptAudioPlayer: AVAudioPlayer?
+    private var shadowingPromptAudioFileURL: URL?
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
     private var lastShadowingPhraseSet: Set<String> = []
@@ -526,15 +528,23 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
         guard !selectedPhrases.isEmpty else {
             shadowingPromptText = ""
             shadowingRequiredPhrases = []
+            shadowingPromptAudioFileURL = nil
             shadowingFeedbackMessage = "Add vocabulary items first to generate a shadowing paragraph."
             return
         }
 
         isGeneratingShadowingPrompt = true
         defer { isGeneratingShadowingPrompt = false }
+        stopShadowingPromptPlayback()
+        shadowingPromptAudioFileURL = nil
 
         do {
-            let generated = try await voiceProcessingService.generateShadowingParagraph(from: selectedPhrases)
+            let generated = try await voiceProcessingService.generateShadowingPromptWithAudio(
+                from: selectedPhrases,
+                voice: AppConfig.shadowingTTSVoice,
+                format: AppConfig.shadowingTTSFormat,
+                speed: AppConfig.shadowingTTSSpeed
+            )
             let paragraph = generated.paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
             shadowingPromptText = paragraph.isEmpty
                 ? "In 30 to 45 seconds, describe a realistic situation using these phrases: \(selectedPhrases.joined(separator: ", "))."
@@ -548,19 +558,42 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
             lastShadowingPhraseSet = Set(shadowingRequiredPhrases.map { normalizeForMatching($0) })
             shadowingTranscript = ""
             shadowingScore = 0
-            shadowingFeedbackMessage = "New prompt ready. Repeat the paragraph naturally."
+            if let tts = generated.tts,
+               let cachedURL = try cacheShadowingPromptAudio(tts) {
+                shadowingPromptAudioFileURL = cachedURL
+                shadowingFeedbackMessage = "New prompt ready. Audio cached and ready to play."
+            } else {
+                shadowingFeedbackMessage = "New prompt ready. Repeat the paragraph naturally."
+            }
         } catch {
-            shadowingPromptText = "In 30 to 45 seconds, describe a realistic situation using these phrases: \(selectedPhrases.joined(separator: ", "))."
-            shadowingRequiredPhrases = selectedPhrases
-            lastShadowingPhraseSet = Set(selectedPhrases.map { normalizeForMatching($0) })
-            shadowingFeedbackMessage = "Using fallback prompt: \(error.localizedDescription)"
+            do {
+                let generated = try await voiceProcessingService.generateShadowingParagraph(from: selectedPhrases)
+                let paragraph = generated.paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+                shadowingPromptText = paragraph.isEmpty
+                    ? "In 30 to 45 seconds, describe a realistic situation using these phrases: \(selectedPhrases.joined(separator: ", "))."
+                    : paragraph
+
+                let cleanRequired = generated.requiredPhrases
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                shadowingRequiredPhrases = cleanRequired.isEmpty ? selectedPhrases : cleanRequired
+                lastShadowingPhraseSet = Set(shadowingRequiredPhrases.map { normalizeForMatching($0) })
+                shadowingTranscript = ""
+                shadowingScore = 0
+                shadowingFeedbackMessage = "Prompt ready (audio unavailable)."
+            } catch {
+                shadowingPromptText = "In 30 to 45 seconds, describe a realistic situation using these phrases: \(selectedPhrases.joined(separator: ", "))."
+                shadowingRequiredPhrases = selectedPhrases
+                lastShadowingPhraseSet = Set(selectedPhrases.map { normalizeForMatching($0) })
+                shadowingFeedbackMessage = "Using fallback prompt: \(error.localizedDescription)"
+            }
         }
     }
 
     func playShadowingPrompt() {
-        if speechSynthesizer.isSpeaking {
-            speechSynthesizer.stopSpeaking(at: .immediate)
-            isShadowingPromptPlaying = false
+        if isShadowingPromptPlaying {
+            stopShadowingPromptPlayback()
             shadowingFeedbackMessage = "Prompt playback stopped."
             return
         }
@@ -568,9 +601,17 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
         let text = shadowingPromptText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        if playCachedShadowingPromptAudioIfAvailable() {
+            return
+        }
+
+        playShadowingPromptUsingSpeechSynthesizer(text: text)
+    }
+
+    private func playShadowingPromptUsingSpeechSynthesizer(text: String) {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.defaultToSpeaker])
             try session.setActive(true)
 
             let utterance = AVSpeechUtterance(string: text)
@@ -586,14 +627,99 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
         }
     }
 
+    private func playCachedShadowingPromptAudioIfAvailable() -> Bool {
+        guard let localURL = shadowingPromptAudioFileURL,
+              FileManager.default.fileExists(atPath: localURL.path) else {
+            return false
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.defaultToSpeaker])
+            try session.setActive(true)
+
+            let player = try AVAudioPlayer(contentsOf: localURL)
+            player.delegate = self
+            player.prepareToPlay()
+            shadowingPromptAudioPlayer = player
+
+            guard player.play() else {
+                shadowingPromptAudioPlayer = nil
+                return false
+            }
+
+            isShadowingPromptPlaying = true
+            shadowingFeedbackMessage = "Playing cached prompt..."
+            return true
+        } catch {
+            shadowingPromptAudioPlayer = nil
+            return false
+        }
+    }
+
+    private func stopShadowingPromptPlayback() {
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+
+        if let player = shadowingPromptAudioPlayer {
+            if player.isPlaying {
+                player.stop()
+            }
+            shadowingPromptAudioPlayer = nil
+        }
+
+        isShadowingPromptPlaying = false
+    }
+
+    private func cacheShadowingPromptAudio(_ tts: ShadowingPromptTTS) throws -> URL? {
+        let encoded = tts.audioBase64.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !encoded.isEmpty else { return nil }
+        guard let audioData = Data(base64Encoded: encoded) else { return nil }
+        guard !audioData.isEmpty else { return nil }
+
+        let cacheDirectory = try shadowingAudioCacheDirectory()
+        let fileExtension = audioFileExtension(for: tts.format)
+        let fileURL = cacheDirectory
+            .appendingPathComponent("shadowing-\(tts.cacheKey)")
+            .appendingPathExtension(fileExtension)
+
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            try audioData.write(to: fileURL, options: .atomic)
+        }
+
+        return fileURL
+    }
+
+    private func shadowingAudioCacheDirectory() throws -> URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let directory = caches.appendingPathComponent("shadowing-audio", isDirectory: true)
+
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        return directory
+    }
+
+    private func audioFileExtension(for format: String) -> String {
+        let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "wav":
+            return "wav"
+        case "m4a":
+            return "m4a"
+        default:
+            return "mp3"
+        }
+    }
+
     func startShadowingCapture() async {
         do {
             guard !isShadowingRecording else { return }
             try await requestRequiredPermissions()
-            if speechSynthesizer.isSpeaking {
-                speechSynthesizer.stopSpeaking(at: .immediate)
-                isShadowingPromptPlaying = false
-            }
+            stopShadowingPromptPlayback()
             try await speakingPracticeAudioRecorderService.startRecording()
             isShadowingRecording = true
             shadowingTranscript = ""
@@ -1041,6 +1167,23 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         isShadowingPromptPlaying = false
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if shadowingPromptAudioPlayer === player {
+            shadowingPromptAudioPlayer = nil
+            isShadowingPromptPlaying = false
+        }
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        if shadowingPromptAudioPlayer === player {
+            shadowingPromptAudioPlayer = nil
+            isShadowingPromptPlaying = false
+            if let error {
+                shadowingFeedbackMessage = "Unable to decode cached prompt audio: \(error.localizedDescription)"
+            }
+        }
     }
 }
 

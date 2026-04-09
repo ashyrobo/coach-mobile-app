@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 function loadLocalEnvFile() {
   const envPath = resolve(process.cwd(), ".env");
@@ -30,6 +31,7 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
 const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const CLOUD_VOCABULARY_FILE_PATH = resolve(process.cwd(), "data", "cloud-vocabulary.json");
 const VOCABULARY_MANAGER_PAGE_PATH = resolve(process.cwd(), "src", "vocabulary-manager.html");
 
@@ -562,6 +564,54 @@ async function generateShadowingParagraph(phrases) {
   };
 }
 
+function normalizeShadowingTTSVoice(rawVoice) {
+  const normalized = String(rawVoice || "alloy").trim().toLowerCase();
+  return normalized || "alloy";
+}
+
+function normalizeShadowingTTSFormat(rawFormat) {
+  const normalized = String(rawFormat || "mp3").trim().toLowerCase();
+  const allowed = new Set(["mp3", "wav"]);
+  return allowed.has(normalized) ? normalized : "mp3";
+}
+
+function normalizeShadowingTTSSpeed(rawSpeed) {
+  const numeric = Number(rawSpeed);
+  if (!Number.isFinite(numeric)) return 1.0;
+  return Math.max(0.25, Math.min(2.0, numeric));
+}
+
+function buildShadowingAudioCacheKey({ paragraph, voice, format, speed }) {
+  return createHash("sha256")
+    .update(`${paragraph}::${voice}::${format}::${speed}::${OPENAI_TTS_MODEL}`)
+    .digest("hex");
+}
+
+async function synthesizeShadowingAudio({ text, voice, format, speed }) {
+  const response = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_TTS_MODEL,
+      voice,
+      input: text,
+      format,
+      speed
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI TTS failed (${response.status}): ${message}`);
+  }
+
+  const audioBuffer = Buffer.from(await response.arrayBuffer());
+  return audioBuffer;
+}
+
 function normalizeBehavioralCategory(rawCategory) {
   const allowed = new Set(["mixed", "leadership", "conflict", "failure", "ownership", "teamwork", "ambiguity", "impact"]);
   const normalized = String(rawCategory || "mixed").trim().toLowerCase();
@@ -1088,6 +1138,68 @@ const server = createServer(async (req, res) => {
     } catch (error) {
       return sendJson(res, 500, {
         error: error instanceof Error ? error.message : "Failed to generate shadowing paragraph"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/practice/shadowing-prompt-with-audio") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const phrases = Array.isArray(payload?.phrases) ? payload.phrases : [];
+      if (!phrases.length) {
+        return sendJson(res, 400, { error: "phrases array is required" });
+      }
+
+      const voice = normalizeShadowingTTSVoice(payload?.voice);
+      const format = normalizeShadowingTTSFormat(payload?.format);
+      const speed = normalizeShadowingTTSSpeed(payload?.speed);
+
+      const shadowing = await generateShadowingParagraph(phrases);
+      const paragraph = String(shadowing?.paragraph || "").trim();
+      if (!paragraph) {
+        return sendJson(res, 500, { error: "Generated shadowing paragraph was empty" });
+      }
+
+      const cacheKey = buildShadowingAudioCacheKey({ paragraph, voice, format, speed });
+
+      try {
+        const audioBuffer = await synthesizeShadowingAudio({
+          text: paragraph,
+          voice,
+          format,
+          speed
+        });
+
+        return sendJson(res, 200, {
+          paragraph,
+          required_phrases: Array.isArray(shadowing.required_phrases) ? shadowing.required_phrases : [],
+          tts: {
+            format,
+            voice,
+            speed,
+            audio_base64: audioBuffer.toString("base64"),
+            cache_key: cacheKey
+          }
+        });
+      } catch (ttsError) {
+        console.error("/v1/practice/shadowing-prompt-with-audio TTS error:", ttsError);
+
+        return sendJson(res, 200, {
+          paragraph,
+          required_phrases: Array.isArray(shadowing.required_phrases) ? shadowing.required_phrases : [],
+          tts: null,
+          warning: "TTS generation failed; paragraph generated without audio."
+        });
+      }
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to generate shadowing prompt with audio"
       });
     }
   }

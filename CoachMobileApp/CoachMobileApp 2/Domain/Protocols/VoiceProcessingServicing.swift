@@ -6,6 +6,12 @@ protocol VoiceProcessingServicing {
     func transcribePracticeAudio(at audioURL: URL) async throws -> String
     func generateVocabularyExamples(for phrase: String) async throws -> [String]
     func generateShadowingParagraph(from phrases: [String]) async throws -> ShadowingParagraph
+    func generateShadowingPromptWithAudio(
+        from phrases: [String],
+        voice: String,
+        format: String,
+        speed: Double
+    ) async throws -> ShadowingPromptWithAudio
     func generateSpeakingMission(from phrases: [String]) async throws -> SpeakingMission
     func generateBehavioralQuestion(category: BehavioralQuestionCategory) async throws -> BehavioralQuestion
     func evaluateBehavioralAnswer(question: BehavioralQuestion, answerTranscript: String) async throws -> BehavioralEvaluation
@@ -109,5 +115,33 @@ struct ShadowingParagraph: Codable {
     enum CodingKeys: String, CodingKey {
         case paragraph
         case requiredPhrases = "required_phrases"
+    }
+}
+
+struct ShadowingPromptTTS: Codable {
+    let format: String
+    let voice: String
+    let speed: Double
+    let audioBase64: String
+    let cacheKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case format
+        case voice
+        case speed
+        case audioBase64 = "audio_base64"
+        case cacheKey = "cache_key"
+    }
+}
+
+struct ShadowingPromptWithAudio: Codable {
+    let paragraph: String
+    let requiredPhrases: [String]
+    let tts: ShadowingPromptTTS?
+
+    enum CodingKeys: String, CodingKey {
+        case paragraph
+        case requiredPhrases = "required_phrases"
+        case tts
     }
 }

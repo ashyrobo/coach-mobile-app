@@ -34,6 +34,12 @@ Three modules share similar pattern: generate/select prompt -> capture speech ->
 - **Mission**: backend-generated mission from vocabulary phrases + local coverage feedback
 - **Behavioral Interview**: backend question generation + backend STAR/rubric evaluation
 
+#### Shadowing TTS Sub-Pattern (New)
+- iOS calls combined endpoint to generate paragraph + TTS in one request.
+- Backend returns paragraph + required phrases + base64 audio payload.
+- iOS caches audio under app cache directory and replays locally via `AVAudioPlayer`.
+- If TTS payload is missing/invalid, iOS falls back to on-device `AVSpeechSynthesizer`.
+
 ## State & Persistence Patterns
 - `VoiceSessionViewModel` is the central orchestrator for recording, processing, vocabulary, and practice states.
 - `SessionHistoryStore` uses JSON file persistence + recording file management in app documents directory.

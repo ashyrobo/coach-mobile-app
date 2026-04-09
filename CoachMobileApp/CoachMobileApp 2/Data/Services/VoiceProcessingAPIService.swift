@@ -14,6 +14,13 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         let phrases: [String]
     }
 
+    private struct ShadowingPromptWithAudioRequest: Codable {
+        let phrases: [String]
+        let voice: String
+        let format: String
+        let speed: Double
+    }
+
     private struct ShadowingParagraphResponse: Codable {
         let shadowing: ShadowingParagraph
     }
@@ -177,6 +184,47 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
             let payload = try JSONDecoder().decode(ShadowingParagraphResponse.self, from: data)
             return payload.shadowing
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func generateShadowingPromptWithAudio(
+        from phrases: [String],
+        voice: String,
+        format: String,
+        speed: Double
+    ) async throws -> ShadowingPromptWithAudio {
+        var request = URLRequest(url: AppConfig.shadowingPromptWithAudioURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let cleanPhrases = phrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let cleanVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanFormat = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let clampedSpeed = min(2.0, max(0.25, speed))
+
+        request.httpBody = try JSONEncoder().encode(
+            ShadowingPromptWithAudioRequest(
+                phrases: cleanPhrases,
+                voice: cleanVoice.isEmpty ? "alloy" : cleanVoice,
+                format: cleanFormat.isEmpty ? "mp3" : cleanFormat,
+                speed: clampedSpeed
+            )
+        )
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            return try JSONDecoder().decode(ShadowingPromptWithAudio.self, from: data)
         } catch let error as AppError {
             throw error
         } catch {
