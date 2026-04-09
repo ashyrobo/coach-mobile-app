@@ -1,31 +1,28 @@
-# Project Brief: Smart Voice Assistant iPhone App
+# Project Brief
 
-## Project Name
-Coach Mobile App (Smart Voice Assistant)
+## Product
+**Coach Mobile App** — an iOS app that helps users turn spoken English into clearer written output, with short coaching feedback.
 
-## Vision
-Build an iPhone app that helps users improve spoken/written English by transforming recorded speech into clearer output with coaching guidance.
+## Core Flow
+1. Record speech in-app.
+2. Transcribe spoken input.
+3. Rewrite by mode (`summarize`, `rewordBetter`) with optional tone control.
+4. Show final text + coaching tips.
+5. Save useful outputs and vocabulary for later review/practice.
 
-## Core User Flow
-1. User records audio in-app.
-2. App transcribes speech to text.
-3. App rewrites text based on selected mode:
-   - Summarize
-   - Full sentence
-   - Reword better
-4. App displays final response with English coaching tips.
-5. Session can be saved to history.
-
-## Scope
-- iOS-first (native SwiftUI).
-- MVP optimized for speed and quality.
-- Hybrid AI approach: on-device first where possible, cloud fallback (OpenAI) for quality and advanced rewriting/coaching.
+## Scope (Current)
+- iOS-first, SwiftUI native app.
+- Fast MVP UX, stable processing pipeline.
+- OpenAI-backed rewriting/coaching.
+- Vocabulary learning support is active (capture + examples + flashcards + practice modules).
+- Behavioral interview and speaking-practice coaching are active product areas.
 
 ## Success Criteria
-- Recording/transcription/rewrite pipeline is reliable and fast.
-- Rewrite modes produce clearly distinct outputs.
-- Coaching tips are useful, concise, and actionable.
-- Privacy and API key security follow production-safe patterns.
+- Reliable and fast record → result flow.
+- Clearly distinct rewrite mode behavior (`summarize`, `rewordBetter`).
+- Practical, concise coaching tips.
+- Safe secret handling (proxy for shared/release usage; careful local handling for personal mode).
 
-## Validation Snapshot
-- MVP core loop has been validated on a physical iPhone (record → transcribe → rewrite/coaching).
+## Current Validation
+- End-to-end flow is validated on physical iPhone.
+- Build/runtime includes active backend-proxy integration for transcription, rewrite/coaching, vocabulary, and interview practice APIs.

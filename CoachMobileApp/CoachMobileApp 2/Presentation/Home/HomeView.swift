@@ -38,18 +38,55 @@ struct HomeView: View {
 
 private struct PracticeView: View {
     @ObservedObject var viewModel: VoiceSessionViewModel
+    @State private var selectedPracticeModule: PracticeModule = .shadowing
+
+    private enum PracticeModule: String, CaseIterable, Identifiable {
+        case shadowing
+        case mission
+        case behavioral
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .shadowing:
+                return "Shadowing"
+            case .mission:
+                return "Mission"
+            case .behavioral:
+                return "Behavioral"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    behavioralInterviewSection
-                    shadowingSection
-                    speakingMissionSection
+                    Picker("Practice Mode", selection: $selectedPracticeModule) {
+                        ForEach(PracticeModule.allCases) { module in
+                            Text(module.title).tag(module)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    activePracticeSection
                 }
                 .padding()
             }
             .navigationTitle("Practice")
+        }
+    }
+
+    @ViewBuilder
+    private var activePracticeSection: some View {
+        switch selectedPracticeModule {
+        case .shadowing:
+            shadowingSection
+        case .mission:
+            speakingMissionSection
+        case .behavioral:
+            behavioralInterviewSection
         }
     }
 
@@ -178,9 +215,11 @@ private struct PracticeView: View {
             Label("Shadowing Practice", systemImage: "waveform.and.mic")
                 .font(.headline)
 
-            if let item = viewModel.shadowingItem {
-                Text("Target phrase: \(item.phrase)")
+            if !viewModel.shadowingPromptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if !viewModel.shadowingRequiredPhrases.isEmpty {
+                    Text("Target phrases: \(viewModel.shadowingRequiredPhrases.joined(separator: ", "))")
                     .font(.subheadline.weight(.semibold))
+                }
 
                 Text(viewModel.shadowingPromptText)
                     .font(.subheadline)
@@ -189,37 +228,44 @@ private struct PracticeView: View {
                     .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                HStack(spacing: 10) {
-                    Button {
-                        viewModel.playShadowingPrompt()
-                    } label: {
-                        Label("Play Prompt", systemImage: "play.circle.fill")
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        Button {
+                            viewModel.playShadowingPrompt()
+                        } label: {
+                            Label(
+                                viewModel.isShadowingPromptPlaying ? "Stop Prompt" : "Play Prompt",
+                                systemImage: viewModel.isShadowingPromptPlaying ? "stop.circle.fill" : "play.circle.fill"
+                            )
                             .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        Task {
-                            if viewModel.isShadowingRecording {
-                                await viewModel.stopShadowingCaptureAndEvaluate()
-                            } else {
-                                await viewModel.startShadowingCapture()
-                            }
                         }
-                    } label: {
-                        Label(viewModel.isShadowingRecording ? "Stop" : "Speak", systemImage: viewModel.isShadowingRecording ? "stop.circle.fill" : "mic.circle.fill")
-                            .frame(maxWidth: .infinity)
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.isShadowingRecording)
+
+                        Button {
+                            Task {
+                                if viewModel.isShadowingRecording {
+                                    await viewModel.stopShadowingCaptureAndEvaluate()
+                                } else {
+                                    await viewModel.startShadowingCapture()
+                                }
+                            }
+                        } label: {
+                            Label(viewModel.isShadowingRecording ? "Stop" : "Speak", systemImage: viewModel.isShadowingRecording ? "stop.circle.fill" : "mic.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(viewModel.isShadowingRecording ? .red : .blue)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(viewModel.isShadowingRecording ? .red : .blue)
 
                     Button {
-                        viewModel.cycleShadowingItem()
+                        Task { await viewModel.generateNextShadowingPrompt() }
                     } label: {
-                        Label("Next", systemImage: "arrow.right.circle")
+                        Label(viewModel.isGeneratingShadowingPrompt ? "Generating..." : "Next Prompt", systemImage: "arrow.right.circle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(viewModel.isGeneratingShadowingPrompt || viewModel.isShadowingRecording)
                 }
 
                 if !viewModel.shadowingTranscript.isEmpty {
@@ -243,7 +289,7 @@ private struct PracticeView: View {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onAppear {
-            viewModel.refreshShadowingCandidate()
+            Task { await viewModel.ensureShadowingPromptReady() }
         }
     }
 
@@ -320,19 +366,90 @@ private struct VocabularyView: View {
     @ObservedObject var viewModel: VoiceSessionViewModel
     private let practiceMaxNewCardsPerDay = 5
     private let recencyCalendar = Calendar.current
+    @State private var selectedVocabularyFilter: VocabularyFilter = .today
+    @State private var vocabularySearchText: String = ""
     private let columns: [GridItem] = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10)
     ]
 
-    private var vocabularyStore: VocabularyStore { viewModel.vocabularyStore }
+    private enum VocabularyFilter: String, CaseIterable, Identifiable {
+        case today
+        case new
+        case learning
+        case review
+        case difficult
 
-    private var wordItems: [VocabularyItem] {
-        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .word }
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .today: return "Today"
+            case .new: return "New"
+            case .learning: return "Learning"
+            case .review: return "Stable"
+            case .difficult: return "Difficult"
+            }
+        }
     }
 
-    private var phraseItems: [VocabularyItem] {
-        vocabularyStore.items.filter { vocabularyCategory(for: $0.phrase) == .phrase }
+    private var vocabularyStore: VocabularyStore { viewModel.vocabularyStore }
+
+    private var sectionCounts: (due: Int, new: Int, learning: Int, review: Int, difficult: Int) {
+        viewModel.vocabularySectionCounts(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
+    }
+
+    private var filteredItems: [VocabularyItem] {
+        let baseItems: [VocabularyItem]
+
+        switch selectedVocabularyFilter {
+        case .today:
+            var seen: Set<UUID> = []
+            let due = vocabularyStore.dueItems()
+            let limitedNew = vocabularyStore.newItems(limitPerDay: practiceMaxNewCardsPerDay)
+            baseItems = (due + limitedNew).filter { seen.insert($0.id).inserted }
+        case .new:
+            baseItems = vocabularyStore.newItems(limitPerDay: Int.max)
+        case .learning:
+            baseItems = vocabularyStore.learningItems()
+        case .review:
+            baseItems = vocabularyStore.reviewItems()
+        case .difficult:
+            baseItems = vocabularyStore.difficultItems()
+        }
+
+        let cleanSearch = vocabularySearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanSearch.isEmpty else { return baseItems }
+
+        return baseItems.filter { item in
+            item.phrase.lowercased().contains(cleanSearch)
+                || item.meaning.lowercased().contains(cleanSearch)
+                || item.correctedSentence.lowercased().contains(cleanSearch)
+        }
+    }
+
+    private var filteredWordItems: [VocabularyItem] {
+        filteredItems.filter { vocabularyCategory(for: $0.phrase) == .word }
+    }
+
+    private var filteredPhraseItems: [VocabularyItem] {
+        filteredItems.filter { vocabularyCategory(for: $0.phrase) == .phrase }
+    }
+
+    private var reminderTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = viewModel.vocabularyReminderHour
+                components.minute = viewModel.vocabularyReminderMinute
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { newValue in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+                viewModel.vocabularyReminderHour = components.hour ?? 20
+                viewModel.vocabularyReminderMinute = components.minute ?? 0
+            }
+        )
     }
 
     var body: some View {
@@ -366,12 +483,26 @@ private struct VocabularyView: View {
                         } else {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 16) {
-                                    if !wordItems.isEmpty {
-                                        wordGridSection(items: wordItems)
+                                    reminderSection
+
+                                    vocabularyFilterSection
+
+                                    searchSection
+
+                                    if filteredItems.isEmpty {
+                                        ContentUnavailableView(
+                                            "No Matches",
+                                            systemImage: "magnifyingglass",
+                                            description: Text("Try a different filter or search term.")
+                                        )
                                     }
 
-                                    if !phraseItems.isEmpty {
-                                        phraseListSection(items: phraseItems)
+                                    if !filteredWordItems.isEmpty {
+                                        wordGridSection(items: filteredWordItems)
+                                    }
+
+                                    if !filteredPhraseItems.isEmpty {
+                                        phraseListSection(items: filteredPhraseItems)
                                     }
                                 }
                                 .padding(.horizontal)
@@ -384,6 +515,8 @@ private struct VocabularyView: View {
             .onAppear {
                 viewModel.refreshVocabularyPracticeStats(maxNewCardsPerDay: practiceMaxNewCardsPerDay)
             }
+            .navigationTitle("Vocabulary")
+            .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     HStack(spacing: 12) {
@@ -436,6 +569,85 @@ private struct VocabularyView: View {
                 .background(.thinMaterial)
             }
         }
+    }
+
+    @ViewBuilder
+    private var reminderSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Daily Reminder", systemImage: "bell.badge")
+                    .font(.headline)
+                Spacer()
+                Toggle("", isOn: $viewModel.vocabularyReminderEnabled)
+                    .labelsHidden()
+            }
+
+            if viewModel.vocabularyReminderEnabled {
+                DatePicker(
+                    "Reminder Time",
+                    selection: reminderTimeBinding,
+                    displayedComponents: .hourAndMinute
+                )
+                .datePickerStyle(.compact)
+            }
+
+            Text("Enable a daily reminder so your due cards come back to your attention.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var vocabularyFilterSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Organized Review")
+                .font(.headline)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    filterChip(.today, count: sectionCounts.due)
+                    filterChip(.new, count: sectionCounts.new)
+                    filterChip(.learning, count: sectionCounts.learning)
+                    filterChip(.review, count: sectionCounts.review)
+                    filterChip(.difficult, count: sectionCounts.difficult)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterChip(_ filter: VocabularyFilter, count: Int) -> some View {
+        let isSelected = selectedVocabularyFilter == filter
+
+        Button {
+            selectedVocabularyFilter = filter
+        } label: {
+            HStack(spacing: 6) {
+                Text(filter.title)
+                Text("\(count)")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(isSelected ? Color.white.opacity(0.28) : Color.secondary.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var searchSection: some View {
+        TextField("Search phrase, meaning, or example", text: $vocabularySearchText)
+            .textFieldStyle(.roundedBorder)
     }
 
     @ViewBuilder
@@ -560,9 +772,25 @@ private struct VocabularyView: View {
     @ViewBuilder
     private var vocabularyPracticeView: some View {
         if let current = viewModel.vocabularyPracticeCurrentItem {
+            let initialCount = max(1, viewModel.vocabularyPracticeSessionInitialCount)
+            let remainingCount = viewModel.vocabularyPracticeQueue.count
+            let reviewedCount = max(0, initialCount - remainingCount)
+            let currentIndex = min(initialCount, reviewedCount + 1)
+
             VStack(alignment: .leading, spacing: 14) {
                 Text("Flashcard Practice")
                     .font(.headline)
+
+                HStack {
+                    Text("Card \(currentIndex) of \(initialCount)")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("Remaining: \(remainingCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ProgressView(value: Double(reviewedCount), total: Double(initialCount))
 
                 Text(current.phrase)
                     .font(.title2.weight(.semibold))
@@ -594,16 +822,19 @@ private struct VocabularyView: View {
                             viewModel.rateCurrentVocabularyCard(.again, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
                         }
                         .buttonStyle(.bordered)
+                        .tint(.red)
 
                         Button("Good") {
                             viewModel.rateCurrentVocabularyCard(.good, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(.blue)
 
                         Button("Easy") {
                             viewModel.rateCurrentVocabularyCard(.easy, maxNewCardsPerDay: practiceMaxNewCardsPerDay)
                         }
                         .buttonStyle(.bordered)
+                        .tint(.green)
                     }
                 } else {
                     Button("Show Answer") {
@@ -612,17 +843,22 @@ private struct VocabularyView: View {
                     .buttonStyle(.borderedProminent)
                 }
 
-                Text("Remaining cards: \(viewModel.vocabularyPracticeQueue.count)")
+                Text("Streak: \(current.consecutiveCorrectCount) • Lapses: \(current.lapseCount)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding()
         } else {
+            let completedCount = viewModel.vocabularyPracticeSessionInitialCount
             ContentUnavailableView(
                 "No Cards Due",
                 systemImage: "checkmark.circle",
-                description: Text("You’re done for now. Great job.")
+                description: Text(
+                    completedCount > 0
+                    ? "Great work — you reviewed \(completedCount) cards this session."
+                    : "You’re done for now. Great job."
+                )
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -1199,6 +1435,21 @@ private struct SettingsView: View {
     @ObservedObject var viewModel: VoiceSessionViewModel
 
     private let billingURL = URL(string: "https://platform.openai.com/settings/organization/billing/overview")!
+    private var reminderTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = viewModel.vocabularyReminderHour
+                components.minute = viewModel.vocabularyReminderMinute
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { newValue in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+                viewModel.vocabularyReminderHour = components.hour ?? 20
+                viewModel.vocabularyReminderMinute = components.minute ?? 0
+            }
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -1212,6 +1463,19 @@ private struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Vocabulary Daily Reminder", isOn: $viewModel.vocabularyReminderEnabled)
+
+                    if viewModel.vocabularyReminderEnabled {
+                        DatePicker(
+                            "Reminder Time",
+                            selection: reminderTimeBinding,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .datePickerStyle(.compact)
+                    }
+                }
 
                 Link(destination: billingURL) {
                     Label("Open Billing Dashboard", systemImage: "safari")

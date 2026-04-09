@@ -1,114 +1,64 @@
 # Progress
 
 ## Current Status
-Core MVP loop is validated on physical iPhone: record → transcribe → rewrite/coaching works end-to-end.
+Project is in a stable post-MVP phase: the core voice rewrite flow is validated on physical iPhone, and the product has expanded into vocabulary retention and speaking/interview practice modules.
 
-Latest implementation milestone completed: **Realtime tab and backend realtime relay were fully removed** from active app/backend paths.
+## What Works
 
-Latest direction update: user validated physical-device run and requested a personal-use path to run without local backend-proxy dependency.
+### Core Voice Flow
+- Record -> process -> rewrite/coaching flow works end-to-end.
+- Rewrite modes currently implemented:
+  - `summarize`
+  - `rewordBetter` (with selectable tone)
+- Session results include transcript, final text, tips, and grammar fixes.
 
-Latest stabilization update: recording + vocabulary paths remain stable after realtime-related removal.
+### App Surface
+- Active tabs in `HomeView`:
+  - Record
+  - Vocabulary
+  - Practice
+  - History
+  - Settings
 
-## What Works (Documented)
-- Clear project vision and user flow.
-- Defined rewrite modes and coaching output expectations.
-- Layered architecture pattern (MVVM + Use Cases + services).
-- Hybrid STT strategy (on-device first, OpenAI fallback).
-- Secure API approach (backend proxy; no client-side API key exposure).
-- MVP-to-production roadmap captured in memory context.
-- iOS source foundation created under `ios/CoachMobileApp` with domain/data/presentation separation.
-- UI flow foundation in place:
-  - mode picker (`summarize`, `fullSentence`, `rewordBetter`)
-  - start/stop recording
-  - process session and render transcript/final text/tips
-- Recording + permission services implemented using AVFoundation and Speech.
-- Backend proxy foundation created under `backend-proxy` with:
-  - `GET /health`
-  - `POST /v1/process-audio` multipart parsing + normalized JSON response.
-- Backend proxy now performs real AI processing:
-  - OpenAI transcription request for uploaded audio
-  - OpenAI rewrite/coaching request with mode-specific prompting
-  - strict JSON normalization to `transcript`, `final_text`, `tips`, `grammar_fixes`
-  - deterministic fallback response when upstream AI fails
-  - `/health` reports `openai_configured`
-- Added `backend-proxy/.env.example` for backend env configuration.
-- Added iOS API base URL overrides (env + UserDefaults) via `AppConfig` to support physical-device LAN testing.
-- Added `ios/CoachMobileApp/Info.plist.example` with microphone and speech privacy usage keys.
-- End-to-end flow on real iPhone is confirmed working by user.
-- Recording UX has been upgraded with explicit controls:
-  - Record, Pause/Resume, Stop actions
-  - live recording timer display during capture
-  - paused-state handling and processing disable while capture is active
-- Live transcription plumbing has been upgraded:
-  - live transcription callback now carries `isFinal` metadata (`LiveTranscriptionUpdate`)
-  - ViewModel uses finalized + partial buffers for live transcript assembly
-  - pause/stop boundaries finalize current partial segment to preserve visible text
-  - overlap/containment merge heuristics reduce repeated sentence appends
-- Settings tab is now functional (no longer placeholder):
-  - OpenAI credit refresh/display (best-effort)
-  - OpenAI month-to-date usage refresh/display (best-effort)
-  - direct OpenAI billing dashboard link
-- Backend proxy now includes settings observability endpoints:
-  - `GET /v1/openai-credit`
-  - `GET /v1/openai-usage-month`
-  - graceful fallback messaging when account/role/key scope cannot access billing/cost data
-- Realtime feature set has now been fully removed:
-  - iOS `Realtime` tab removed from `HomeView`
-  - realtime ViewModel state/actions removed from `VoiceSessionViewModel`
-  - realtime config removed from `AppConfig`
-  - realtime streaming class removed from `VoiceProcessingAPIService`
-  - backend realtime session endpoint and websocket relay removed from `backend-proxy/src/server.js`
-  - backend `ws` dependency removed from `package.json` + lockfile
-  - post-removal validation passed (`node --check` + `xcodebuild`)
-- Remote deployment posture validated at architecture level:
-  - app can run on phone without localhost backend when deployed backend URL is configured (e.g., Render)
-- Repo hygiene updates completed:
-  - `.gitignore` now ignores `backend-proxy/node_modules/`
-  - `.gitignore` now ignores `*.xcuserstate`
-  - backend lockfile generation captured (`backend-proxy/package-lock.json`)
-- Vocabulary learning flow has been expanded:
-  - manual **spoken add** from Vocabulary tab is now implemented (mic start/stop -> OpenAI STT extraction)
-  - extracted spoken input now produces structured vocabulary item data (`phrase`, `meaning`, `corrected_sentence`)
-  - vocabulary detail now auto-generates comprehensive usage examples (multiple sentence contexts)
-  - generated examples are cached and persisted with each vocabulary item
-  - vocabulary tab header now uses compact inline title (large title removed)
-- Level 1 vocabulary flashcard practice is now implemented:
-  - vocabulary item model now stores flashcard review metadata (`flashcardState`, `nextReviewAt`, `lastReviewedAt`, `reviewCount`)
-  - practice queue logic now supports due cards + daily cap for new cards (default 5/day)
-  - review ratings are implemented with fixed scheduling:
-    - `Again` -> review again in 10 minutes
-    - `Good` -> review in 1 day
-    - `Easy` -> review in 3 days
-  - Vocabulary tab now includes in-app practice flow:
-    - `Start Practice` / `End Practice`
-    - flashcard front + reveal answer
-    - rating buttons (`Again`, `Good`, `Easy`)
-    - due count + reviewed-today counters
-  - daily counters for reviewed/new-reviewed are persisted via `UserDefaults`
-- Backend proxy supports vocabulary AI endpoints:
-  - `POST /v1/vocabulary/extract-from-audio`
-  - `POST /v1/vocabulary/examples`
-- Build validation completed after vocabulary feature implementation:
-  - `node --check backend-proxy/src/server.js` passed
-  - `xcodebuild` for `CoachMobileApp` simulator build passed
-  - `xcodebuild` for `CoachMobileApp` simulator build passed after Level 1 flashcard additions (`iPhone 17`)
+### Vocabulary
+- Manual vocabulary capture from voice input via backend extraction endpoint.
+- Vocabulary examples generation per phrase.
+- Flashcard scheduling and review metadata on items.
+- Practice queue with ratings-driven scheduling.
+- Cloud vocabulary sync through backend (`GET/PUT /v1/vocabulary/cloud`).
+- Reminder settings/cadence controls integrated in app state.
 
-## What’s Left to Build
-1. Confirm/document canonical iOS source path and clean duplicate folder ambiguity.
-2. Ensure actual target `Info.plist` values match privacy template in committed project configuration.
-3. Add transcription strategy layer (on-device first, cloud fallback) as runtime behavior.
-4. Persist sessions (SwiftData) and build history browsing UI.
-5. Add tests (ViewModel/use-case unit tests + backend contract tests) and basic analytics/error tracking.
-6. Add optional direct-to-OpenAI iOS mode for personal prototype operation (while keeping proxy mode for security/release).
-7. Continue refining transcript merge heuristics for rare pause/re-segmentation edge cases.
+### Practice Features
+- Shadowing module with speech capture and scoring feedback.
+- Speaking mission generation + completion feedback.
+- Behavioral interview module:
+  - question generation by category
+  - spoken answer capture
+  - STAR coverage + rubric evaluation + improved answer + follow-up questions
 
-## Known Risks / Considerations
-- Latency and quality trade-offs between local and cloud transcription.
-- Prompt drift if response formatting is not strictly constrained.
-- Cost control required for transcription + generation at scale.
-- App Store/privacy disclosures needed for cloud audio processing.
-- OpenAI billing/cost API access is inconsistent across account types and permission scopes; "credit remaining" may be unavailable even with a valid API key.
-- Apple Speech partial/final segmentation can vary by pause cadence and locale, creating edge cases where live text may still duplicate unless merge logic is carefully tuned.
+### History / Persistence
+- Session history persistence implemented with local JSON + audio file storage.
+- Vocabulary persistence implemented with local JSON store.
+
+### Backend Proxy
+- Node backend proxy is active and provides rewrite, vocabulary, interview, and observability endpoints.
+- OpenAI integration in place for transcription and completion-based coaching tasks.
+
+### Removed / Deprecated
+- Realtime streaming architecture and related iOS/backend wiring have been removed from active code paths.
+
+## In Progress / Remaining
+1. Keep memory-bank docs synchronized with active implementation details.
+2. Expand automated tests:
+   - iOS ViewModel/use case coverage
+   - backend contract/shape validation
+3. Resolve remaining repo ambiguity around duplicate iOS trees.
+4. Clarify/refactor transcription method configuration naming to match actual behavior.
+
+## Risks / Considerations
+- OpenAI billing/usage endpoint availability varies by account/org permissions.
+- Cost/latency must be monitored for frequent transcription + generation usage.
+- Privacy disclosures remain important for cloud audio/text processing.
 
 ## Next Milestone
-Move from validated MVP to durable v1 baseline: canonicalized project structure, persisted history, initial automated tests, and ongoing stability improvements for recording + vocabulary workflows.
+Move from stable feature-rich prototype to durable v1 baseline through stronger test coverage, clearer project structure, and tightened configuration semantics.

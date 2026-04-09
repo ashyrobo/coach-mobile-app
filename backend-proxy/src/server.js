@@ -496,6 +496,72 @@ async function generateSpeakingMission(phrases) {
   };
 }
 
+async function generateShadowingParagraph(phrases) {
+  const cleanPhrases = Array.isArray(phrases)
+    ? phrases
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+
+  if (cleanPhrases.length === 0) {
+    return {
+      paragraph:
+        "Today I focused on improving my English by speaking clearly, organizing my thoughts, and using practical vocabulary in realistic situations.",
+      required_phrases: []
+    };
+  }
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "paragraph": "string",\n  "required_phrases": ["string"]\n}\nRules:\n- paragraph should be a coherent 4-6 sentence paragraph for shadowing practice\n- write in natural spoken-style English with clear flow\n- required_phrases must include exactly the provided phrases\n- paragraph must naturally include every required phrase exactly once if possible`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.35,
+      messages: [
+        {
+          role: "system",
+          content: "You are an English speaking coach. Output only valid JSON in the requested shape."
+        },
+        {
+          role: "user",
+          content: `Required phrases:\n- ${cleanPhrases.join("\n- ")}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI shadowing paragraph generation failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Could not parse shadowing paragraph JSON from model response.");
+  }
+
+  const paragraph = String(parsed.paragraph || "").trim();
+  const requiredPhrases = Array.isArray(parsed.required_phrases)
+    ? parsed.required_phrases.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    paragraph:
+      paragraph ||
+      `In one short story, explain a realistic day while naturally using these phrases: ${cleanPhrases.join(", ")}.`,
+    required_phrases: requiredPhrases.length > 0 ? requiredPhrases : cleanPhrases
+  };
+}
+
 function normalizeBehavioralCategory(rawCategory) {
   const allowed = new Set(["mixed", "leadership", "conflict", "failure", "ownership", "teamwork", "ambiguity", "impact"]);
   const normalized = String(rawCategory || "mixed").trim().toLowerCase();
@@ -999,6 +1065,29 @@ const server = createServer(async (req, res) => {
     } catch (error) {
       return sendJson(res, 500, {
         error: error instanceof Error ? error.message : "Failed to generate speaking mission"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/vocabulary/shadowing-paragraph") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const phrases = Array.isArray(payload?.phrases) ? payload.phrases : [];
+      if (!phrases.length) {
+        return sendJson(res, 400, { error: "phrases array is required" });
+      }
+
+      const shadowing = await generateShadowingParagraph(phrases);
+      return sendJson(res, 200, { shadowing });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to generate shadowing paragraph"
       });
     }
   }

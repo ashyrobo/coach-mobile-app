@@ -79,6 +79,13 @@ enum AppConfig {
             .appendingPathComponent("speaking-mission")
     }
 
+    static var shadowingParagraphURL: URL {
+        voiceProcessingBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("vocabulary")
+            .appendingPathComponent("shadowing-paragraph")
+    }
+
     static var behavioralQuestionURL: URL {
         voiceProcessingBaseURL
             .appendingPathComponent("v1")

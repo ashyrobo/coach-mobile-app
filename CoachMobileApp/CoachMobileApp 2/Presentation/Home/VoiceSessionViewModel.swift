@@ -1,6 +1,7 @@
 import Combine
 import AVFoundation
 import Foundation
+import UserNotifications
 
 enum VocabularyFlashcardState: String, Codable {
     case new
@@ -14,8 +15,14 @@ enum VocabularyReviewRating {
     case easy
 }
 
+enum VocabularyReviewRatingRecord: String, Codable {
+    case again
+    case good
+    case easy
+}
+
 @MainActor
-final class VoiceSessionViewModel: ObservableObject {
+final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate {
     enum RecordingState {
         case idle
         case recording
@@ -45,13 +52,38 @@ final class VoiceSessionViewModel: ObservableObject {
     @Published var vocabularyExamplesLoadingID: UUID?
     @Published var vocabularyPracticeQueue: [VocabularyItem] = []
     @Published var vocabularyPracticeCurrentItem: VocabularyItem?
+    @Published var vocabularyPracticeSessionInitialCount: Int = 0
     @Published var isVocabularyPracticeAnswerRevealed: Bool = false
     @Published var vocabularyPracticeReviewedToday: Int = 0
     @Published var vocabularyPracticeDueCount: Int = 0
     @Published var isVocabularyPracticeActive: Bool = false
-    @Published var shadowingItem: VocabularyItem?
+    @Published var vocabularyReminderEnabled: Bool = false {
+        didSet {
+            defaults.set(vocabularyReminderEnabled, forKey: Self.vocabularyReminderEnabledKey)
+            Task { await updateVocabularyReminderSchedule() }
+        }
+    }
+    @Published var vocabularyReminderHour: Int = 20 {
+        didSet {
+            defaults.set(vocabularyReminderHour, forKey: Self.vocabularyReminderHourKey)
+            if vocabularyReminderEnabled {
+                Task { await updateVocabularyReminderSchedule() }
+            }
+        }
+    }
+    @Published var vocabularyReminderMinute: Int = 0 {
+        didSet {
+            defaults.set(vocabularyReminderMinute, forKey: Self.vocabularyReminderMinuteKey)
+            if vocabularyReminderEnabled {
+                Task { await updateVocabularyReminderSchedule() }
+            }
+        }
+    }
     @Published var shadowingPromptText: String = ""
+    @Published var shadowingRequiredPhrases: [String] = []
+    @Published var isGeneratingShadowingPrompt: Bool = false
     @Published var isShadowingRecording: Bool = false
+    @Published var isShadowingPromptPlaying: Bool = false
     @Published var shadowingTranscript: String = ""
     @Published var shadowingFeedbackMessage: String = ""
     @Published var shadowingScore: Int = 0
@@ -81,9 +113,15 @@ final class VoiceSessionViewModel: ObservableObject {
     private let vocabularyAudioRecorderService: AudioRecorderServicing
     private let speakingPracticeAudioRecorderService: AudioRecorderServicing
     private let behavioralAudioRecorderService: AudioRecorderServicing
+    private let defaults = UserDefaults.standard
+    private static let vocabularyReminderEnabledKey = "vocabulary-reminder-enabled"
+    private static let vocabularyReminderHourKey = "vocabulary-reminder-hour"
+    private static let vocabularyReminderMinuteKey = "vocabulary-reminder-minute"
+    private static let vocabularyReminderNotificationID = "vocabulary-daily-reminder"
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var recordingState: RecordingState = .idle
     private var recordingTimerCancellable: AnyCancellable?
+    private var lastShadowingPhraseSet: Set<String> = []
 
     init(
         historyStore: SessionHistoryStore,
@@ -101,17 +139,20 @@ final class VoiceSessionViewModel: ObservableObject {
         self.speakingPracticeAudioRecorderService = AudioRecorderService()
         self.behavioralAudioRecorderService = AudioRecorderService()
         self.processVoiceSessionUseCase = ProcessVoiceSessionUseCase(voiceProcessingService: voiceProcessingService)
+        super.init()
+        speechSynthesizer.delegate = self
         applyTranscriptionMethodSelection()
+        hydrateVocabularyReminderSettings()
         hydrateVocabularyExamplesCache()
         refreshVocabularyPracticeStats()
-        refreshShadowingCandidate()
 
         Task { [weak self] in
             await self?.syncVocabularyFromCloud()
+            await self?.ensureShadowingPromptReady()
         }
     }
 
-    convenience init() {
+    override convenience init() {
         self.init(
             historyStore: SessionHistoryStore(),
             vocabularyStore: VocabularyStore(),
@@ -456,8 +497,10 @@ final class VoiceSessionViewModel: ObservableObject {
     func deleteVocabularyItem(id: UUID, maxNewCardsPerDay: Int = 5) {
         vocabularyStore.deleteItem(id: id)
         refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
-        refreshShadowingCandidate()
-        Task { await syncVocabularyToCloud() }
+        Task {
+            await syncVocabularyToCloud()
+            await ensureShadowingPromptReady(forceRegenerate: true)
+        }
     }
 
     private func hydrateVocabularyExamplesCache() {
@@ -468,57 +511,89 @@ final class VoiceSessionViewModel: ObservableObject {
         vocabularyExamplesByItemID = cache
     }
 
-    func refreshShadowingCandidate() {
-        if let current = shadowingItem,
-           vocabularyStore.items.contains(where: { $0.id == current.id }) {
-            updateShadowingPrompt(for: current)
+    func ensureShadowingPromptReady(forceRegenerate: Bool = false) async {
+        if !forceRegenerate,
+           !shadowingPromptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !shadowingRequiredPhrases.isEmpty {
             return
         }
 
-        shadowingItem = vocabularyStore.items.first
-        if let first = shadowingItem {
-            updateShadowingPrompt(for: first)
-        } else {
-            shadowingPromptText = ""
-        }
+        await generateNextShadowingPrompt()
     }
 
-    func cycleShadowingItem() {
-        guard !vocabularyStore.items.isEmpty else {
-            shadowingItem = nil
+    func generateNextShadowingPrompt() async {
+        let selectedPhrases = selectRandomShadowingPhrases(targetCount: 8)
+        guard !selectedPhrases.isEmpty else {
             shadowingPromptText = ""
+            shadowingRequiredPhrases = []
+            shadowingFeedbackMessage = "Add vocabulary items first to generate a shadowing paragraph."
             return
         }
 
-        guard let current = shadowingItem,
-              let index = vocabularyStore.items.firstIndex(where: { $0.id == current.id }) else {
-            shadowingItem = vocabularyStore.items.first
-            if let first = shadowingItem { updateShadowingPrompt(for: first) }
-            return
-        }
+        isGeneratingShadowingPrompt = true
+        defer { isGeneratingShadowingPrompt = false }
 
-        let nextIndex = vocabularyStore.items.index(after: index)
-        let wrappedIndex = nextIndex < vocabularyStore.items.endIndex ? nextIndex : vocabularyStore.items.startIndex
-        let nextItem = vocabularyStore.items[wrappedIndex]
-        shadowingItem = nextItem
-        updateShadowingPrompt(for: nextItem)
+        do {
+            let generated = try await voiceProcessingService.generateShadowingParagraph(from: selectedPhrases)
+            let paragraph = generated.paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            shadowingPromptText = paragraph.isEmpty
+                ? "In 30 to 45 seconds, describe a realistic situation using these phrases: \(selectedPhrases.joined(separator: ", "))."
+                : paragraph
+
+            let cleanRequired = generated.requiredPhrases
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            shadowingRequiredPhrases = cleanRequired.isEmpty ? selectedPhrases : cleanRequired
+            lastShadowingPhraseSet = Set(shadowingRequiredPhrases.map { normalizeForMatching($0) })
+            shadowingTranscript = ""
+            shadowingScore = 0
+            shadowingFeedbackMessage = "New prompt ready. Repeat the paragraph naturally."
+        } catch {
+            shadowingPromptText = "In 30 to 45 seconds, describe a realistic situation using these phrases: \(selectedPhrases.joined(separator: ", "))."
+            shadowingRequiredPhrases = selectedPhrases
+            lastShadowingPhraseSet = Set(selectedPhrases.map { normalizeForMatching($0) })
+            shadowingFeedbackMessage = "Using fallback prompt: \(error.localizedDescription)"
+        }
     }
 
     func playShadowingPrompt() {
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+            isShadowingPromptPlaying = false
+            shadowingFeedbackMessage = "Prompt playback stopped."
+            return
+        }
+
         let text = shadowingPromptText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        speechSynthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.48
-        speechSynthesizer.speak(utterance)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+            try session.setActive(true)
+
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+            utterance.rate = 0.48
+
+            isShadowingPromptPlaying = true
+            shadowingFeedbackMessage = "Playing prompt..."
+            speechSynthesizer.speak(utterance)
+        } catch {
+            isShadowingPromptPlaying = false
+            shadowingFeedbackMessage = "Unable to play prompt right now."
+        }
     }
 
     func startShadowingCapture() async {
         do {
             guard !isShadowingRecording else { return }
             try await requestRequiredPermissions()
+            if speechSynthesizer.isSpeaking {
+                speechSynthesizer.stopSpeaking(at: .immediate)
+                isShadowingPromptPlaying = false
+            }
             try await speakingPracticeAudioRecorderService.startRecording()
             isShadowingRecording = true
             shadowingTranscript = ""
@@ -540,11 +615,10 @@ final class VoiceSessionViewModel: ObservableObject {
             let transcript = try await voiceProcessingService.transcribePracticeAudio(at: audioURL)
             shadowingTranscript = transcript
 
-            let phrase = shadowingItem?.phrase ?? ""
             let evaluation = evaluateShadowingAttempt(
                 transcript: transcript,
                 promptText: shadowingPromptText,
-                requiredPhrase: phrase
+                requiredPhrases: shadowingRequiredPhrases
             )
 
             shadowingScore = evaluation.score
@@ -699,6 +773,7 @@ final class VoiceSessionViewModel: ObservableObject {
         let queue = vocabularyStore.buildPracticeQueue(maxNewCardsPerDay: maxNewCardsPerDay)
         vocabularyPracticeQueue = queue
         vocabularyPracticeCurrentItem = queue.first
+        vocabularyPracticeSessionInitialCount = queue.count
         isVocabularyPracticeAnswerRevealed = false
         isVocabularyPracticeActive = !queue.isEmpty
         refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
@@ -724,6 +799,7 @@ final class VoiceSessionViewModel: ObservableObject {
     func endVocabularyPractice(maxNewCardsPerDay: Int = 5) {
         vocabularyPracticeQueue = []
         vocabularyPracticeCurrentItem = nil
+        vocabularyPracticeSessionInitialCount = 0
         isVocabularyPracticeAnswerRevealed = false
         isVocabularyPracticeActive = false
         refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
@@ -734,9 +810,98 @@ final class VoiceSessionViewModel: ObservableObject {
         vocabularyPracticeDueCount = vocabularyStore.buildPracticeQueue(maxNewCardsPerDay: maxNewCardsPerDay).count
     }
 
-    private func updateShadowingPrompt(for item: VocabularyItem) {
-        let prompt = item.correctedSentence.trimmingCharacters(in: .whitespacesAndNewlines)
-        shadowingPromptText = prompt.isEmpty ? item.phrase : prompt
+    func vocabularySectionCounts(maxNewCardsPerDay: Int = 5, now: Date = Date()) -> (due: Int, new: Int, learning: Int, review: Int, difficult: Int) {
+        let due = vocabularyStore.dueItems(now: now).count + vocabularyStore.newItems(limitPerDay: maxNewCardsPerDay, now: now).count
+        let newCount = vocabularyStore.newItems(limitPerDay: Int.max, now: now).count
+        let learning = vocabularyStore.learningItems().count
+        let review = vocabularyStore.reviewItems().count
+        let difficult = vocabularyStore.difficultItems().count
+        return (due, newCount, learning, review, difficult)
+    }
+
+    private func hydrateVocabularyReminderSettings() {
+        if defaults.object(forKey: Self.vocabularyReminderEnabledKey) != nil {
+            vocabularyReminderEnabled = defaults.bool(forKey: Self.vocabularyReminderEnabledKey)
+        }
+
+        if defaults.object(forKey: Self.vocabularyReminderHourKey) != nil {
+            vocabularyReminderHour = min(23, max(0, defaults.integer(forKey: Self.vocabularyReminderHourKey)))
+        }
+
+        if defaults.object(forKey: Self.vocabularyReminderMinuteKey) != nil {
+            vocabularyReminderMinute = min(59, max(0, defaults.integer(forKey: Self.vocabularyReminderMinuteKey)))
+        }
+    }
+
+    private func updateVocabularyReminderSchedule() async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.vocabularyReminderNotificationID])
+
+        guard vocabularyReminderEnabled else { return }
+
+        do {
+            let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            guard granted else {
+                vocabularyVoiceStatusMessage = "Enable notifications in Settings to get vocabulary reminders."
+                vocabularyReminderEnabled = false
+                return
+            }
+
+            var dateComponents = DateComponents()
+            dateComponents.hour = vocabularyReminderHour
+            dateComponents.minute = vocabularyReminderMinute
+
+            let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+            let content = UNMutableNotificationContent()
+            content.title = "Vocabulary practice reminder"
+            content.body = "Quick review now helps you remember words longer."
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: Self.vocabularyReminderNotificationID,
+                content: content,
+                trigger: trigger
+            )
+
+            try await center.add(request)
+        } catch {
+            vocabularyVoiceStatusMessage = "Could not schedule vocabulary reminder."
+        }
+    }
+
+    private func selectRandomShadowingPhrases(targetCount: Int) -> [String] {
+        let uniquePhrases = Array(
+            Set(
+                vocabularyStore.items
+                    .map(\.phrase)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+
+        guard !uniquePhrases.isEmpty else { return [] }
+
+        if uniquePhrases.count <= targetCount {
+            return uniquePhrases.shuffled()
+        }
+
+        let previous = lastShadowingPhraseSet
+        let freshPool = uniquePhrases.filter { !previous.contains(normalizeForMatching($0)) }
+
+        if freshPool.count >= targetCount {
+            return Array(freshPool.shuffled().prefix(targetCount))
+        }
+
+        var selected = freshPool.shuffled()
+        let remainderPool = uniquePhrases
+            .filter { phrase in
+                !selected.contains(where: { normalizeForMatching($0) == normalizeForMatching(phrase) })
+            }
+            .shuffled()
+
+        let needed = max(0, targetCount - selected.count)
+        selected.append(contentsOf: remainderPool.prefix(needed))
+        return Array(selected.prefix(targetCount))
     }
 
     private func normalizeForMatching(_ text: String) -> String {
@@ -760,38 +925,56 @@ final class VoiceSessionViewModel: ObservableObject {
     private func evaluateShadowingAttempt(
         transcript: String,
         promptText: String,
-        requiredPhrase: String
+        requiredPhrases: [String]
     ) -> (score: Int, feedback: String) {
         let normalizedTranscript = normalizeForMatching(transcript)
         let normalizedPrompt = normalizeForMatching(promptText)
-        let normalizedPhrase = normalizeForMatching(requiredPhrase)
 
         guard !normalizedTranscript.isEmpty else {
             return (0, "I couldn’t detect clear speech. Try again and speak a little louder.")
         }
 
-        let phraseCovered = !normalizedPhrase.isEmpty && normalizedTranscript.contains(normalizedPhrase)
+        let required = requiredPhrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let coveredPhrases = required.filter { phrase in
+            normalizedTranscript.contains(normalizeForMatching(phrase))
+        }
+
+        let coverageRatio: Double = {
+            guard !required.isEmpty else { return 0 }
+            return Double(coveredPhrases.count) / Double(required.count)
+        }()
 
         let transcriptTokens = tokenSet(normalizedTranscript)
         let promptTokens = tokenSet(normalizedPrompt)
         let overlap = transcriptTokens.intersection(promptTokens).count
         let similarity = promptTokens.isEmpty ? 0 : Double(overlap) / Double(promptTokens.count)
 
-        let score = min(100, Int((phraseCovered ? 60.0 : 0.0) + (similarity * 40.0)))
+        let score = min(100, Int((coverageRatio * 60.0) + (similarity * 40.0)))
+        let coverageText = required.isEmpty
+            ? "No required phrase list provided."
+            : "Used \(coveredPhrases.count)/\(required.count) required phrases."
+
+        let missed = required.filter { !coveredPhrases.contains($0) }
 
         if score >= 85 {
-            return (score, "Excellent — very close to the prompt and strong phrase usage.")
+            return (score, "\(coverageText) Excellent — very close to the paragraph with strong phrase usage.")
         }
 
         if score >= 65 {
-            return (score, phraseCovered
-                ? "Good attempt. Keep the rhythm smoother and match the sentence more closely."
-                : "Nice flow, but make sure to include the target phrase exactly.")
+            if missed.isEmpty {
+                return (score, "\(coverageText) Good attempt. Keep the rhythm smoother and match wording even more closely.")
+            }
+            return (score, "\(coverageText) Missed: \(missed.joined(separator: ", ")).")
         }
 
-        return (score, phraseCovered
-            ? "You included the phrase. Next, shadow the full sentence more closely."
-            : "Try again: include the target phrase and follow the prompt wording.")
+        if missed.isEmpty {
+            return (score, "\(coverageText) Nice phrase coverage. Now focus on mirroring more of the paragraph wording.")
+        }
+
+        return (score, "\(coverageText) Try again and include: \(missed.joined(separator: ", ")).")
     }
 
     private func evaluateMissionAttempt(transcript: String, mission: SpeakingMission) -> (covered: Int, feedback: String) {
@@ -834,6 +1017,7 @@ final class VoiceSessionViewModel: ObservableObject {
     private func advanceVocabularyPracticeQueue(maxNewCardsPerDay: Int = 5) {
         guard !vocabularyPracticeQueue.isEmpty else {
             vocabularyPracticeCurrentItem = nil
+            vocabularyPracticeSessionInitialCount = 0
             isVocabularyPracticeAnswerRevealed = false
             isVocabularyPracticeActive = false
             refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
@@ -845,6 +1029,18 @@ final class VoiceSessionViewModel: ObservableObject {
         isVocabularyPracticeAnswerRevealed = false
         isVocabularyPracticeActive = vocabularyPracticeCurrentItem != nil
         refreshVocabularyPracticeStats(maxNewCardsPerDay: maxNewCardsPerDay)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        isShadowingPromptPlaying = true
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        isShadowingPromptPlaying = false
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        isShadowingPromptPlaying = false
     }
 }
 
@@ -957,6 +1153,10 @@ struct VocabularyItem: Identifiable, Codable {
     let nextReviewAt: Date
     let lastReviewedAt: Date?
     let reviewCount: Int
+    let consecutiveCorrectCount: Int
+    let lapseCount: Int
+    let easeFactor: Double
+    let lastRating: VocabularyReviewRatingRecord?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -972,6 +1172,10 @@ struct VocabularyItem: Identifiable, Codable {
         case nextReviewAt
         case lastReviewedAt
         case reviewCount
+        case consecutiveCorrectCount
+        case lapseCount
+        case easeFactor
+        case lastRating
     }
 
     init(
@@ -987,7 +1191,11 @@ struct VocabularyItem: Identifiable, Codable {
         flashcardState: VocabularyFlashcardState = .new,
         nextReviewAt: Date = Date(),
         lastReviewedAt: Date? = nil,
-        reviewCount: Int = 0
+        reviewCount: Int = 0,
+        consecutiveCorrectCount: Int = 0,
+        lapseCount: Int = 0,
+        easeFactor: Double = 2.5,
+        lastRating: VocabularyReviewRatingRecord? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -1002,6 +1210,10 @@ struct VocabularyItem: Identifiable, Codable {
         self.nextReviewAt = nextReviewAt
         self.lastReviewedAt = lastReviewedAt
         self.reviewCount = reviewCount
+        self.consecutiveCorrectCount = consecutiveCorrectCount
+        self.lapseCount = lapseCount
+        self.easeFactor = easeFactor
+        self.lastRating = lastRating
     }
 
     init(from decoder: Decoder) throws {
@@ -1019,6 +1231,10 @@ struct VocabularyItem: Identifiable, Codable {
         nextReviewAt = try container.decodeIfPresent(Date.self, forKey: .nextReviewAt) ?? createdAt
         lastReviewedAt = try container.decodeIfPresent(Date.self, forKey: .lastReviewedAt)
         reviewCount = try container.decodeIfPresent(Int.self, forKey: .reviewCount) ?? 0
+        consecutiveCorrectCount = try container.decodeIfPresent(Int.self, forKey: .consecutiveCorrectCount) ?? 0
+        lapseCount = try container.decodeIfPresent(Int.self, forKey: .lapseCount) ?? 0
+        easeFactor = try container.decodeIfPresent(Double.self, forKey: .easeFactor) ?? 2.5
+        lastRating = try container.decodeIfPresent(VocabularyReviewRatingRecord.self, forKey: .lastRating)
     }
 }
 
@@ -1056,8 +1272,8 @@ final class VocabularyStore: ObservableObject {
         loadItems()
     }
 
-    func buildPracticeQueue(maxNewCardsPerDay: Int = 5, now: Date = Date()) -> [VocabularyItem] {
-        let dueReviewCards = items
+    func dueItems(now: Date = Date()) -> [VocabularyItem] {
+        items
             .filter { $0.flashcardState != .new && $0.nextReviewAt <= now }
             .sorted {
                 if $0.nextReviewAt != $1.nextReviewAt {
@@ -1065,14 +1281,42 @@ final class VocabularyStore: ObservableObject {
                 }
                 return $0.createdAt < $1.createdAt
             }
+    }
 
-        let remainingAllowance = max(0, maxNewCardsPerDay - newCardsReviewedCount(on: now))
-        let newCards = items
+    func newItems(limitPerDay: Int = Int.max, now: Date = Date()) -> [VocabularyItem] {
+        let remainingAllowance = max(0, limitPerDay - newCardsReviewedCount(on: now))
+        return items
             .filter { $0.flashcardState == .new }
             .sorted { $0.createdAt < $1.createdAt }
             .prefix(remainingAllowance)
+            .map { $0 }
+    }
 
-        return dueReviewCards + newCards
+    func learningItems() -> [VocabularyItem] {
+        items
+            .filter { $0.flashcardState == .learning }
+            .sorted { $0.nextReviewAt < $1.nextReviewAt }
+    }
+
+    func reviewItems() -> [VocabularyItem] {
+        items
+            .filter { $0.flashcardState == .review }
+            .sorted { $0.nextReviewAt < $1.nextReviewAt }
+    }
+
+    func difficultItems() -> [VocabularyItem] {
+        items
+            .filter { ($0.lapseCount >= 2) || ($0.lastRating == .again) }
+            .sorted {
+                if $0.lapseCount != $1.lapseCount {
+                    return $0.lapseCount > $1.lapseCount
+                }
+                return $0.nextReviewAt < $1.nextReviewAt
+            }
+    }
+
+    func buildPracticeQueue(maxNewCardsPerDay: Int = 5, now: Date = Date()) -> [VocabularyItem] {
+        dueItems(now: now) + newItems(limitPerDay: maxNewCardsPerDay, now: now)
     }
 
     func reviewedCount(on date: Date = Date()) -> Int {
@@ -1087,17 +1331,35 @@ final class VocabularyStore: ObservableObject {
         let wasNew = existing.flashcardState == .new
         let nextDate: Date
         let nextState: VocabularyFlashcardState
+        let nextEaseFactor: Double
+        let nextStreak: Int
+        let nextLapseCount: Int
+        let ratingRecord: VocabularyReviewRatingRecord
 
         switch rating {
         case .again:
             nextDate = Calendar.current.date(byAdding: .minute, value: 10, to: now) ?? now
             nextState = .learning
+            nextEaseFactor = max(1.3, existing.easeFactor - 0.2)
+            nextStreak = 0
+            nextLapseCount = existing.lapseCount + 1
+            ratingRecord = .again
         case .good:
-            nextDate = Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now
+            let proposedDays = max(1, Int(round(Double(max(1, existing.consecutiveCorrectCount + 1)) * existing.easeFactor / 2.0)))
+            nextDate = Calendar.current.date(byAdding: .day, value: proposedDays, to: now) ?? now
             nextState = .review
+            nextEaseFactor = min(3.2, existing.easeFactor + 0.05)
+            nextStreak = existing.consecutiveCorrectCount + 1
+            nextLapseCount = existing.lapseCount
+            ratingRecord = .good
         case .easy:
-            nextDate = Calendar.current.date(byAdding: .day, value: 3, to: now) ?? now
+            let proposedDays = max(3, Int(round(Double(max(2, existing.consecutiveCorrectCount + 2)) * (existing.easeFactor + 0.35))))
+            nextDate = Calendar.current.date(byAdding: .day, value: proposedDays, to: now) ?? now
             nextState = .review
+            nextEaseFactor = min(3.5, existing.easeFactor + 0.15)
+            nextStreak = existing.consecutiveCorrectCount + 2
+            nextLapseCount = existing.lapseCount
+            ratingRecord = .easy
         }
 
         let updated = VocabularyItem(
@@ -1113,7 +1375,11 @@ final class VocabularyStore: ObservableObject {
             flashcardState: nextState,
             nextReviewAt: nextDate,
             lastReviewedAt: now,
-            reviewCount: existing.reviewCount + 1
+            reviewCount: existing.reviewCount + 1,
+            consecutiveCorrectCount: nextStreak,
+            lapseCount: nextLapseCount,
+            easeFactor: nextEaseFactor,
+            lastRating: ratingRecord
         )
 
         items[index] = updated
@@ -1230,7 +1496,11 @@ final class VocabularyStore: ObservableObject {
             flashcardState: existing.flashcardState,
             nextReviewAt: existing.nextReviewAt,
             lastReviewedAt: existing.lastReviewedAt,
-            reviewCount: existing.reviewCount
+            reviewCount: existing.reviewCount,
+            consecutiveCorrectCount: existing.consecutiveCorrectCount,
+            lapseCount: existing.lapseCount,
+            easeFactor: existing.easeFactor,
+            lastRating: existing.lastRating
         )
 
         do {

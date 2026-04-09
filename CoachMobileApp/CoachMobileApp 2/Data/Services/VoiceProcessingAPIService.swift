@@ -10,6 +10,14 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         let phrases: [String]
     }
 
+    private struct ShadowingParagraphRequest: Codable {
+        let phrases: [String]
+    }
+
+    private struct ShadowingParagraphResponse: Codable {
+        let shadowing: ShadowingParagraph
+    }
+
     private struct SpeakingMissionResponse: Codable {
         let mission: SpeakingMission
     }
@@ -144,6 +152,31 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
             let payload = try JSONDecoder().decode(SpeakingMissionResponse.self, from: data)
             return payload.mission
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func generateShadowingParagraph(from phrases: [String]) async throws -> ShadowingParagraph {
+        var request = URLRequest(url: AppConfig.shadowingParagraphURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let cleanPhrases = phrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        request.httpBody = try JSONEncoder().encode(ShadowingParagraphRequest(phrases: cleanPhrases))
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(ShadowingParagraphResponse.self, from: data)
+            return payload.shadowing
         } catch let error as AppError {
             throw error
         } catch {

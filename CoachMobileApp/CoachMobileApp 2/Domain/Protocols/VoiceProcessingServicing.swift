@@ -5,6 +5,7 @@ protocol VoiceProcessingServicing {
     func extractVocabularyFromAudio(at audioURL: URL) async throws -> VocabularyExtractionResult
     func transcribePracticeAudio(at audioURL: URL) async throws -> String
     func generateVocabularyExamples(for phrase: String) async throws -> [String]
+    func generateShadowingParagraph(from phrases: [String]) async throws -> ShadowingParagraph
     func generateSpeakingMission(from phrases: [String]) async throws -> SpeakingMission
     func generateBehavioralQuestion(category: BehavioralQuestionCategory) async throws -> BehavioralQuestion
     func evaluateBehavioralAnswer(question: BehavioralQuestion, answerTranscript: String) async throws -> BehavioralEvaluation
@@ -98,5 +99,15 @@ struct SpeakingMission: Codable {
         case prompt
         case requiredPhrases = "required_phrases"
         case sampleAnswer = "sample_answer"
+    }
+}
+
+struct ShadowingParagraph: Codable {
+    let paragraph: String
+    let requiredPhrases: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case paragraph
+        case requiredPhrases = "required_phrases"
     }
 }

@@ -1,25 +1,25 @@
 # Product Context
 
-## Why This Product Exists
-Many learners and professionals can speak ideas but struggle to express them clearly in polished English. They need immediate help turning spoken drafts into better final output while learning from mistakes.
+## Why It Exists
+Users can express ideas faster by voice than by typing, but often need help turning rough speech into polished English. Coach Mobile App converts spoken drafts into improved writing, then extends learning with vocabulary and speaking/interview practice.
 
-## Problems It Solves
-- Converts spontaneous voice input into structured, usable text.
-- Provides multiple rewrite intents (short summary vs. complete sentence vs. polished wording).
-- Adds coaching feedback so each interaction is a learning moment, not just a one-time correction.
+## Problems Solved
+- Convert spontaneous voice input into structured text.
+- Support distinct rewrite intents: `summarize` and `rewordBetter` (with tone control for rewording).
+- Provide short, actionable tips so each response also teaches.
+- Help retain improvements via vocabulary extraction, examples, and flashcard review.
+- Support spoken practice loops (shadowing, speaking mission, behavioral interview response coaching).
 
-## Target User Experience
-- **Fast**: minimal steps from record to result.
-- **Clear**: obvious mode selection and distinct output behavior.
-- **Helpful**: concise coaching tips with practical corrections.
-- **Trustworthy**: private-by-design handling of audio/text.
+## Target UX
+- **Fast**: low friction from recording to result.
+- **Clear**: mode behavior is obvious and output predictable.
+- **Helpful**: concise, practical corrections.
+- **Trustworthy**: privacy-aware handling of audio/text.
+- **Habit-forming**: daily vocabulary practice and reminders to reinforce progress.
 
-## Primary User Scenarios
-1. User speaks a rough thought and wants a concise summary.
-2. User speaks fragmented English and wants complete, grammatically correct sentences.
-3. User wants improved wording for professional or natural communication.
-
-## UX Principles
-- One-tap recording with obvious status feedback.
-- Deterministic response format for stable rendering.
-- Coaching tips prioritized by impact (grammar, clarity, vocabulary).
+## Primary Scenarios
+1. Rough spoken thought → concise summary.
+2. Plain wording → more natural/professional phrasing.
+3. Session output → saved history + extracted vocabulary cards for later review.
+4. Vocabulary item → generated example sentences + spaced practice.
+5. Practice mode → behavioral interview question, spoken answer, STAR-based feedback.
