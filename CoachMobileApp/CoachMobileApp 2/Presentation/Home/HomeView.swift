@@ -322,6 +322,18 @@ private struct PracticeView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if !viewModel.missionTargetPhrases.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Today’s target upgrades")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text(viewModel.missionTargetPhrases.joined(separator: " • "))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 HStack(spacing: 10) {
                     Button {
                         Task {
@@ -350,6 +362,23 @@ private struct PracticeView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+
+                if !viewModel.missionActivationEvaluations.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Activation feedback")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(viewModel.missionActivationEvaluations) { evaluation in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(activationIcon(for: evaluation))
+                                Text(activationSummary(for: evaluation))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             } else {
                 Text(viewModel.missionFeedbackMessage.isEmpty ? "Generate a mission to practice multiple phrases in one response." : viewModel.missionFeedbackMessage)
                     .font(.footnote)
@@ -359,6 +388,44 @@ private struct PracticeView: View {
         .padding(12)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func activationIcon(for evaluation: VocabularyActivationEvaluation) -> String {
+        if evaluation.used {
+            switch evaluation.naturalness {
+            case .natural:
+                return "✅"
+            case .awkward, .forced:
+                return "⚠️"
+            case .notUsed:
+                return "🔁"
+            }
+        }
+
+        return evaluation.missedOpportunity ? "🔁" : "➖"
+    }
+
+    private func activationSummary(for evaluation: VocabularyActivationEvaluation) -> String {
+        let phrase = evaluation.phrase
+        if evaluation.used {
+            switch evaluation.naturalness {
+            case .natural:
+                return "\(phrase): used naturally"
+            case .awkward:
+                return "\(phrase): used, but sounded awkward"
+            case .forced:
+                return "\(phrase): used, but sounded forced"
+            case .notUsed:
+                return "\(phrase): not clearly used"
+            }
+        }
+
+        if evaluation.missedOpportunity {
+            let suggestion = evaluation.suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+            return suggestion.isEmpty ? "\(phrase): missed upgrade opportunity" : "\(phrase): try \(suggestion)"
+        }
+
+        return "\(phrase): not used this round"
     }
 }
 
@@ -677,19 +744,18 @@ private struct VocabularyView: View {
                     .truncationMode(.tail)
                     .foregroundStyle(.primary)
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
 
-                Text(style.recencyLabel)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(style.baseColor)
+                Text(activationLevel(for: item))
+                    .font(.caption2.weight(.bold))
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(style.baseColor.opacity(0.14))
+                    .padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.08))
                     .clipShape(Capsule())
             }
-            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
             .background(style.backgroundColor)
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -721,36 +787,23 @@ private struct VocabularyView: View {
                     .frame(width: 8, height: 8)
 
                 Text(item.phrase)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(.primary)
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
 
-                if let tag = item.tag, !tag.isEmpty {
-                    Text(tag)
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(0.12))
-                        .clipShape(Capsule())
-                        .lineLimit(1)
-                }
-
-                Text(style.recencyLabel)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(style.baseColor)
+                Text(activationLevel(for: item))
+                    .font(.caption2.weight(.bold))
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(style.baseColor.opacity(0.14))
+                    .padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.08))
                     .clipShape(Capsule())
-                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
             .background(style.backgroundColor)
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -842,10 +895,6 @@ private struct VocabularyView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-
-                Text("Streak: \(current.consecutiveCorrectCount) • Lapses: \(current.lapseCount)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding()
@@ -886,7 +935,7 @@ private struct VocabularyView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 8) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                 ForEach(items) { item in
                     phraseRow(for: item)
                 }
@@ -912,7 +961,6 @@ private struct VocabularyView: View {
         let baseColor: Color
         let backgroundColor: Color
         let borderColor: Color
-        let recencyLabel: String
     }
 
     @ViewBuilder
@@ -920,7 +968,7 @@ private struct VocabularyView: View {
         HStack(spacing: 10) {
             legendPill(color: .orange, text: "Learning")
             legendPill(color: .green, text: "Stable")
-            legendPill(color: .gray, text: "New/Stale")
+            legendPill(color: .gray, text: "New")
         }
         .font(.caption2)
     }
@@ -947,14 +995,12 @@ private struct VocabularyView: View {
             baseColor = .green
         }
 
-        let recencyLabel = recencyLabel(for: item)
         let recencyOpacity = recencyStrength(for: item)
 
         return VocabularyCardVisualStyle(
             baseColor: baseColor,
             backgroundColor: baseColor.opacity(recencyOpacity),
-            borderColor: baseColor.opacity(0.38),
-            recencyLabel: recencyLabel
+            borderColor: baseColor.opacity(0.38)
         )
     }
 
@@ -972,21 +1018,19 @@ private struct VocabularyView: View {
         }
     }
 
-    private func recencyLabel(for item: VocabularyItem, now: Date = Date()) -> String {
-        guard let lastReviewedAt = item.lastReviewedAt else {
-            return item.flashcardState == .new ? "new" : "stale"
-        }
-
-        let days = recencyCalendar.dateComponents([.day], from: lastReviewedAt, to: now).day ?? 99
-        switch days {
-        case ..<1:
-            return "today"
-        case 1...7:
-            return "this week"
+    private func activationLevel(for item: VocabularyItem) -> String {
+        switch item.activationScore {
+        case ..<25:
+            return "Known"
+        case ..<50:
+            return "Practiced"
+        case ..<75:
+            return "Usable"
         default:
-            return "stale"
+            return "Auto"
         }
     }
+
 }
 
 private struct VocabularyDetailView: View {
@@ -1021,7 +1065,18 @@ private struct VocabularyDetailView: View {
                     Text("Saved on \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Text("Activation: \(activationLevel(for: item)) (\(Int(item.activationScore.rounded()))/100)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+
+                vocabularyInfoCard(
+                    title: "Production Signals",
+                    icon: "waveform.path.ecg",
+                    accentColor: .teal,
+                    content: "Natural uses: \(item.naturalUseCount) • Awkward uses: \(item.awkwardUseCount) • Missed opportunities: \(item.missedOpportunityCount)"
+                )
 
                 vocabularyInfoCard(
                     title: "Meaning",
@@ -1106,6 +1161,19 @@ private struct VocabularyDetailView: View {
         .padding(12)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func activationLevel(for item: VocabularyItem) -> String {
+        switch item.activationScore {
+        case ..<25:
+            return "Known"
+        case ..<50:
+            return "Practiced"
+        case ..<75:
+            return "Usable"
+        default:
+            return "Automatic"
+        }
     }
 }
 

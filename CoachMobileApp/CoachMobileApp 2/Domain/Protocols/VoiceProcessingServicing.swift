@@ -13,10 +13,48 @@ protocol VoiceProcessingServicing {
         speed: Double
     ) async throws -> ShadowingPromptWithAudio
     func generateSpeakingMission(from phrases: [String]) async throws -> SpeakingMission
+    func generateAdaptiveSpeakingMission(from phrases: [String]) async throws -> SpeakingMission
+    func evaluateVocabularyActivation(
+        responseText: String,
+        targetPhrases: [String],
+        context: VocabularyActivationContext
+    ) async throws -> [VocabularyActivationEvaluation]
     func generateBehavioralQuestion(category: BehavioralQuestionCategory) async throws -> BehavioralQuestion
     func evaluateBehavioralAnswer(question: BehavioralQuestion, answerTranscript: String) async throws -> BehavioralEvaluation
     func fetchCloudVocabulary() async throws -> [VocabularyItem]
     func replaceCloudVocabulary(with items: [VocabularyItem]) async throws
+}
+
+enum VocabularyActivationContext: String, Codable {
+    case mission
+    case shadowing
+    case behavioral
+    case general
+}
+
+enum VocabularyNaturalness: String, Codable {
+    case natural
+    case awkward
+    case forced
+    case notUsed = "not_used"
+}
+
+struct VocabularyActivationEvaluation: Codable, Identifiable {
+    let phrase: String
+    let used: Bool
+    let naturalness: VocabularyNaturalness
+    let missedOpportunity: Bool
+    let suggestion: String
+
+    var id: String { phrase.lowercased() }
+
+    enum CodingKeys: String, CodingKey {
+        case phrase
+        case used
+        case naturalness
+        case missedOpportunity = "missed_opportunity"
+        case suggestion
+    }
 }
 
 enum BehavioralQuestionCategory: String, CaseIterable, Identifiable, Codable {

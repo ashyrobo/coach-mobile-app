@@ -94,6 +94,8 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
     @Published var missionFeedbackMessage: String = ""
     @Published var missionCoverageCount: Int = 0
     @Published var missionCoverageTotal: Int = 0
+    @Published var missionTargetPhrases: [String] = []
+    @Published var missionActivationEvaluations: [VocabularyActivationEvaluation] = []
     @Published var selectedBehavioralCategory: BehavioralQuestionCategory = .mixed
     @Published var currentBehavioralQuestion: BehavioralQuestion?
     @Published var isGeneratingBehavioralQuestion: Bool = false
@@ -610,9 +612,7 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
 
     private func playShadowingPromptUsingSpeechSynthesizer(text: String) {
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.defaultToSpeaker])
-            try session.setActive(true)
+            try configureAudioSessionForPromptPlayback()
 
             let utterance = AVSpeechUtterance(string: text)
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
@@ -634,9 +634,7 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
         }
 
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.defaultToSpeaker])
-            try session.setActive(true)
+            try configureAudioSessionForPromptPlayback()
 
             let player = try AVAudioPlayer(contentsOf: localURL)
             player.delegate = self
@@ -670,6 +668,15 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
         }
 
         isShadowingPromptPlaying = false
+
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func configureAudioSessionForPromptPlayback() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try session.setActive(true)
     }
 
     private func cacheShadowingPromptAudio(_ tts: ShadowingPromptTTS) throws -> URL? {
@@ -756,8 +763,7 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
     }
 
     func generateContextSpeakingMission() async {
-        let candidatePhrases = vocabularyStore.items
-            .prefix(3)
+        let candidatePhrases = selectAdaptiveMissionTargets(limit: 5)
             .map(\.phrase)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -771,8 +777,16 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
         defer { isGeneratingSpeakingMission = false }
 
         do {
-            let mission = try await voiceProcessingService.generateSpeakingMission(from: candidatePhrases)
+            let mission: SpeakingMission
+            do {
+                mission = try await voiceProcessingService.generateAdaptiveSpeakingMission(from: candidatePhrases)
+            } catch {
+                mission = try await voiceProcessingService.generateSpeakingMission(from: candidatePhrases)
+            }
+
             currentSpeakingMission = mission
+            missionTargetPhrases = mission.requiredPhrases.isEmpty ? candidatePhrases : mission.requiredPhrases
+            missionActivationEvaluations = []
             missionTranscript = ""
             missionCoverageCount = 0
             missionCoverageTotal = mission.requiredPhrases.count
@@ -889,10 +903,42 @@ final class VoiceSessionViewModel: NSObject, ObservableObject, @preconcurrency A
             missionCoverageCount = evaluation.covered
             missionCoverageTotal = mission.requiredPhrases.count
             missionFeedbackMessage = evaluation.feedback
+
+            let activationTargets = mission.requiredPhrases.isEmpty ? missionTargetPhrases : mission.requiredPhrases
+            guard !activationTargets.isEmpty else { return }
+
+            do {
+                let activation = try await voiceProcessingService.evaluateVocabularyActivation(
+                    responseText: transcript,
+                    targetPhrases: activationTargets,
+                    context: .mission
+                )
+
+                missionActivationEvaluations = activation
+                vocabularyStore.applyActivationEvaluations(activation)
+                await syncVocabularyToCloud()
+            } catch {
+                missionFeedbackMessage += " Activation feedback unavailable right now."
+            }
         } catch {
             isMissionRecording = false
             missionFeedbackMessage = "Could not evaluate mission response: \(error.localizedDescription)"
         }
+    }
+
+    private func selectAdaptiveMissionTargets(limit: Int) -> [VocabularyItem] {
+        vocabularyStore.items
+            .sorted {
+                if $0.activationScore != $1.activationScore {
+                    return $0.activationScore < $1.activationScore
+                }
+                if $0.missedOpportunityCount != $1.missedOpportunityCount {
+                    return $0.missedOpportunityCount > $1.missedOpportunityCount
+                }
+                return $0.createdAt > $1.createdAt
+            }
+            .prefix(limit)
+            .map { $0 }
     }
 
     func startVocabularyPractice(maxNewCardsPerDay: Int = 5) {
@@ -1300,6 +1346,13 @@ struct VocabularyItem: Identifiable, Codable {
     let lapseCount: Int
     let easeFactor: Double
     let lastRating: VocabularyReviewRatingRecord?
+    let activationScore: Double
+    let productionAttempts: Int
+    let productionSuccesses: Int
+    let naturalUseCount: Int
+    let awkwardUseCount: Int
+    let missedOpportunityCount: Int
+    let lastProductionAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1319,6 +1372,13 @@ struct VocabularyItem: Identifiable, Codable {
         case lapseCount
         case easeFactor
         case lastRating
+        case activationScore
+        case productionAttempts
+        case productionSuccesses
+        case naturalUseCount
+        case awkwardUseCount
+        case missedOpportunityCount
+        case lastProductionAt
     }
 
     init(
@@ -1338,7 +1398,14 @@ struct VocabularyItem: Identifiable, Codable {
         consecutiveCorrectCount: Int = 0,
         lapseCount: Int = 0,
         easeFactor: Double = 2.5,
-        lastRating: VocabularyReviewRatingRecord? = nil
+        lastRating: VocabularyReviewRatingRecord? = nil,
+        activationScore: Double = 0,
+        productionAttempts: Int = 0,
+        productionSuccesses: Int = 0,
+        naturalUseCount: Int = 0,
+        awkwardUseCount: Int = 0,
+        missedOpportunityCount: Int = 0,
+        lastProductionAt: Date? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -1357,6 +1424,13 @@ struct VocabularyItem: Identifiable, Codable {
         self.lapseCount = lapseCount
         self.easeFactor = easeFactor
         self.lastRating = lastRating
+        self.activationScore = activationScore
+        self.productionAttempts = productionAttempts
+        self.productionSuccesses = productionSuccesses
+        self.naturalUseCount = naturalUseCount
+        self.awkwardUseCount = awkwardUseCount
+        self.missedOpportunityCount = missedOpportunityCount
+        self.lastProductionAt = lastProductionAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1378,6 +1452,13 @@ struct VocabularyItem: Identifiable, Codable {
         lapseCount = try container.decodeIfPresent(Int.self, forKey: .lapseCount) ?? 0
         easeFactor = try container.decodeIfPresent(Double.self, forKey: .easeFactor) ?? 2.5
         lastRating = try container.decodeIfPresent(VocabularyReviewRatingRecord.self, forKey: .lastRating)
+        activationScore = try container.decodeIfPresent(Double.self, forKey: .activationScore) ?? 0
+        productionAttempts = try container.decodeIfPresent(Int.self, forKey: .productionAttempts) ?? 0
+        productionSuccesses = try container.decodeIfPresent(Int.self, forKey: .productionSuccesses) ?? 0
+        naturalUseCount = try container.decodeIfPresent(Int.self, forKey: .naturalUseCount) ?? 0
+        awkwardUseCount = try container.decodeIfPresent(Int.self, forKey: .awkwardUseCount) ?? 0
+        missedOpportunityCount = try container.decodeIfPresent(Int.self, forKey: .missedOpportunityCount) ?? 0
+        lastProductionAt = try container.decodeIfPresent(Date.self, forKey: .lastProductionAt)
     }
 }
 
@@ -1643,7 +1724,14 @@ final class VocabularyStore: ObservableObject {
             consecutiveCorrectCount: existing.consecutiveCorrectCount,
             lapseCount: existing.lapseCount,
             easeFactor: existing.easeFactor,
-            lastRating: existing.lastRating
+            lastRating: existing.lastRating,
+            activationScore: existing.activationScore,
+            productionAttempts: existing.productionAttempts,
+            productionSuccesses: existing.productionSuccesses,
+            naturalUseCount: existing.naturalUseCount,
+            awkwardUseCount: existing.awkwardUseCount,
+            missedOpportunityCount: existing.missedOpportunityCount,
+            lastProductionAt: existing.lastProductionAt
         )
 
         do {
@@ -1806,5 +1894,97 @@ final class VocabularyStore: ObservableObject {
         let key = reviewedCountKey(for: date)
         let current = defaults.integer(forKey: key)
         defaults.set(current + 1, forKey: key)
+    }
+
+    func applyActivationEvaluations(_ evaluations: [VocabularyActivationEvaluation], now: Date = Date()) {
+        guard !evaluations.isEmpty else { return }
+
+        var changed = false
+        for evaluation in evaluations {
+            let normalizedPhrase = evaluation.phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedPhrase.isEmpty else { continue }
+
+            guard let index = items.firstIndex(where: {
+                $0.phrase.caseInsensitiveCompare(normalizedPhrase) == .orderedSame
+            }) else { continue }
+
+            let existing = items[index]
+            let nextAttempts = existing.productionAttempts + 1
+            let nextSuccesses = existing.productionSuccesses + (evaluation.used ? 1 : 0)
+            let nextNatural = existing.naturalUseCount + (evaluation.naturalness == .natural ? 1 : 0)
+            let nextAwkward = existing.awkwardUseCount + ((evaluation.naturalness == .awkward || evaluation.naturalness == .forced) ? 1 : 0)
+            let nextMissed = existing.missedOpportunityCount + (evaluation.missedOpportunity ? 1 : 0)
+
+            let memoryScore = memoryComponent(for: existing)
+            let productionScore = productionComponent(
+                attempts: nextAttempts,
+                successes: nextSuccesses,
+                naturalUseCount: nextNatural,
+                awkwardUseCount: nextAwkward,
+                missedOpportunityCount: nextMissed
+            )
+            let nextActivation = min(100, max(0, memoryScore + productionScore))
+
+            items[index] = VocabularyItem(
+                id: existing.id,
+                createdAt: existing.createdAt,
+                sourceSessionID: existing.sourceSessionID,
+                phrase: existing.phrase,
+                tag: existing.tag,
+                meaning: existing.meaning,
+                spokenSentence: existing.spokenSentence,
+                correctedSentence: existing.correctedSentence,
+                exampleSentences: existing.exampleSentences,
+                flashcardState: existing.flashcardState,
+                nextReviewAt: existing.nextReviewAt,
+                lastReviewedAt: existing.lastReviewedAt,
+                reviewCount: existing.reviewCount,
+                consecutiveCorrectCount: existing.consecutiveCorrectCount,
+                lapseCount: existing.lapseCount,
+                easeFactor: existing.easeFactor,
+                lastRating: existing.lastRating,
+                activationScore: nextActivation,
+                productionAttempts: nextAttempts,
+                productionSuccesses: nextSuccesses,
+                naturalUseCount: nextNatural,
+                awkwardUseCount: nextAwkward,
+                missedOpportunityCount: nextMissed,
+                lastProductionAt: now
+            )
+            changed = true
+        }
+
+        guard changed else { return }
+        do {
+            try persistItems()
+        } catch {
+            print("Failed to persist activation updates: \(error.localizedDescription)")
+        }
+    }
+
+    private func memoryComponent(for item: VocabularyItem) -> Int {
+        var score = 0.0
+        score += min(20.0, Double(item.reviewCount) * 2.0)
+        score += min(12.0, Double(item.consecutiveCorrectCount) * 2.0)
+        score -= min(10.0, Double(item.lapseCount) * 2.0)
+        score += max(0.0, min(8.0, (item.easeFactor - 1.3) * 4.0))
+        return Int(max(0.0, min(40.0, score)).rounded())
+    }
+
+    private func productionComponent(
+        attempts: Int,
+        successes: Int,
+        naturalUseCount: Int,
+        awkwardUseCount: Int,
+        missedOpportunityCount: Int
+    ) -> Int {
+        guard attempts > 0 else { return 0 }
+
+        let successRatio = Double(successes) / Double(attempts)
+        var score = successRatio * 30.0
+        score += min(20.0, Double(naturalUseCount) * 2.0)
+        score -= min(15.0, Double(awkwardUseCount) * 1.5)
+        score -= min(15.0, Double(missedOpportunityCount) * 1.5)
+        return Int(max(0.0, min(60.0, score)).rounded())
     }
 }

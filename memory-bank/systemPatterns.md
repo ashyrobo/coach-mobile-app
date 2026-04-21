@@ -31,8 +31,21 @@ This keeps UI state orchestration centralized while external integrations remain
 Three modules share similar pattern: generate/select prompt -> capture speech -> transcribe/evaluate -> feedback.
 
 - **Shadowing**: phrase replay + spoken attempt evaluation
-- **Mission**: backend-generated mission from vocabulary phrases + local coverage feedback
+- **Mission**: backend-generated mission from vocabulary phrases + local coverage feedback + activation evaluation loop
 - **Behavioral Interview**: backend question generation + backend STAR/rubric evaluation
+
+#### Mission Activation Sub-Pattern (New)
+- iOS mission target selection uses vocabulary activation signals:
+  - prioritize lower `activationScore`
+  - prefer higher `missedOpportunityCount`
+- iOS requests mission via adaptive endpoint first:
+  - `POST /v1/mission/generate-adaptive`
+  - fallback: `POST /v1/vocabulary/speaking-mission`
+- After transcript capture, iOS sends target phrases + response text to:
+  - `POST /v1/vocabulary/activation/evaluate`
+- Backend returns per-target evaluation:
+  - `used`, `naturalness`, `missed_opportunity`, `suggestion`
+- iOS updates local `VocabularyItem` production metrics and recomputes `activationScore`, then syncs cloud vocabulary.
 
 #### Shadowing TTS Sub-Pattern (New)
 - iOS calls combined endpoint to generate paragraph + TTS in one request.
@@ -66,6 +79,10 @@ Three modules share similar pattern: generate/select prompt -> capture speech ->
 - `GET /v1/vocabulary/cloud`
 - `PUT /v1/vocabulary/cloud`
 - `POST /v1/vocabulary/speaking-mission`
+- `POST /v1/vocabulary/activation/evaluate`
+
+### Adaptive Mission
+- `POST /v1/mission/generate-adaptive`
 
 ### Interview Coaching
 - `POST /v1/interview/behavioral/question`

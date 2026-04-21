@@ -24,6 +24,7 @@ Project is in a stable post-MVP phase: the core voice rewrite flow is validated 
 - Manual vocabulary capture from voice input via backend extraction endpoint.
 - Vocabulary examples generation per phrase.
 - Flashcard scheduling and review metadata on items.
+- Activation intelligence metadata on items (activation score + production usage counters).
 - Practice queue with ratings-driven scheduling.
 - Cloud vocabulary sync through backend (`GET/PUT /v1/vocabulary/cloud`).
 - Reminder settings/cadence controls integrated in app state.
@@ -32,6 +33,12 @@ Project is in a stable post-MVP phase: the core voice rewrite flow is validated 
 - Shadowing module with speech capture and scoring feedback.
 - Shadowing prompt generation now supports backend OpenAI TTS + local cached playback fallback path.
 - Speaking mission generation + completion feedback.
+- Adaptive speaking mission flow:
+  - target phrases are selected from weak activation items in iOS
+  - iOS requests adaptive mission endpoint first, then falls back to legacy mission endpoint
+- Mission activation feedback loop:
+  - backend evaluates per-target usage/naturalness/missed opportunities
+  - iOS applies evaluation to vocabulary activation scores and syncs updates to cloud
 - Behavioral interview module:
   - question generation by category
   - spoken answer capture
@@ -45,6 +52,8 @@ Project is in a stable post-MVP phase: the core voice rewrite flow is validated 
 - Node backend proxy is active and provides rewrite, vocabulary, interview, and observability endpoints.
 - OpenAI integration in place for transcription and completion-based coaching tasks.
 - Added combined shadowing prompt + neural TTS endpoint: `POST /v1/practice/shadowing-prompt-with-audio`.
+- Added adaptive mission endpoint: `POST /v1/mission/generate-adaptive`.
+- Added activation evaluation endpoint: `POST /v1/vocabulary/activation/evaluate`.
 
 ### Removed / Deprecated
 - Realtime streaming architecture and related iOS/backend wiring have been removed from active code paths.

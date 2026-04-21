@@ -40,6 +40,8 @@
 - `POST /v1/vocabulary/extract-from-audio`
 - `POST /v1/vocabulary/examples`
 - `POST /v1/vocabulary/speaking-mission`
+- `POST /v1/vocabulary/activation/evaluate`
+- `POST /v1/mission/generate-adaptive`
 - `POST /v1/practice/shadowing-prompt-with-audio`
 
 ### Interview Practice

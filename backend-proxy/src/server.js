@@ -498,6 +498,109 @@ async function generateSpeakingMission(phrases) {
   };
 }
 
+async function generateAdaptiveSpeakingMission(phrases) {
+  return generateSpeakingMission(phrases);
+}
+
+function normalizeActivationContext(rawContext) {
+  const allowed = new Set(["mission", "shadowing", "behavioral", "general"]);
+  const normalized = String(rawContext || "general").trim().toLowerCase();
+  return allowed.has(normalized) ? normalized : "general";
+}
+
+async function evaluateVocabularyActivation({ responseText, targetPhrases, context }) {
+  const cleanResponse = String(responseText || "").trim();
+  const cleanTargets = Array.isArray(targetPhrases)
+    ? targetPhrases
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+  const cleanContext = normalizeActivationContext(context);
+
+  if (!cleanTargets.length) return [];
+
+  if (!cleanResponse) {
+    return cleanTargets.map((phrase) => ({
+      phrase,
+      used: false,
+      naturalness: "not_used",
+      missed_opportunity: false,
+      suggestion: ""
+    }));
+  }
+
+  const schemaInstruction = `Return strict JSON with this exact shape:\n{\n  "evaluations": [\n    {\n      "phrase": "string",\n      "used": true,\n      "naturalness": "natural|awkward|forced|not_used",\n      "missed_opportunity": false,\n      "suggestion": "string"\n    }\n  ]\n}\nRules:\n- Include exactly one evaluation per target phrase\n- phrase must exactly match a target phrase\n- used=false must set naturalness to not_used\n- missed_opportunity=true only when phrase could naturally have been used but was avoided\n- suggestion must be short and practical (or empty string if not needed)`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      temperature: 0.1,
+      messages: [
+        {
+          role: "system",
+          content: "You evaluate spoken vocabulary activation quality. Output only valid JSON in the requested shape."
+        },
+        {
+          role: "user",
+          content: `Context: ${cleanContext}\nTarget phrases:\n- ${cleanTargets.join("\n- ")}\n\nResponse text:\n${cleanResponse}\n\n${schemaInstruction}`
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI activation evaluation failed (${response.status}): ${message}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || "";
+  const parsed = extractJsonObject(content);
+  const modelEvaluations = Array.isArray(parsed?.evaluations) ? parsed.evaluations : [];
+
+  const normalizedByPhrase = new Map();
+  for (const row of modelEvaluations) {
+    const phrase = String(row?.phrase || "").trim();
+    if (!phrase) continue;
+    normalizedByPhrase.set(phrase.toLowerCase(), {
+      phrase,
+      used: Boolean(row?.used),
+      naturalness: ["natural", "awkward", "forced", "not_used"].includes(String(row?.naturalness || "").trim())
+        ? String(row.naturalness).trim()
+        : (Boolean(row?.used) ? "awkward" : "not_used"),
+      missed_opportunity: Boolean(row?.missed_opportunity),
+      suggestion: String(row?.suggestion || "").trim()
+    });
+  }
+
+  return cleanTargets.map((phrase) => {
+    const fromModel = normalizedByPhrase.get(phrase.toLowerCase());
+    if (fromModel) {
+      return {
+        phrase,
+        used: fromModel.used,
+        naturalness: fromModel.used ? fromModel.naturalness : "not_used",
+        missed_opportunity: fromModel.missed_opportunity,
+        suggestion: fromModel.suggestion
+      };
+    }
+
+    return {
+      phrase,
+      used: false,
+      naturalness: "not_used",
+      missed_opportunity: false,
+      suggestion: ""
+    };
+  });
+}
+
 async function generateShadowingParagraph(phrases) {
   const cleanPhrases = Array.isArray(phrases)
     ? phrases
@@ -1115,6 +1218,60 @@ const server = createServer(async (req, res) => {
     } catch (error) {
       return sendJson(res, 500, {
         error: error instanceof Error ? error.message : "Failed to generate speaking mission"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/mission/generate-adaptive") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const phrases = Array.isArray(payload?.phrases) ? payload.phrases : [];
+      if (!phrases.length) {
+        return sendJson(res, 400, { error: "phrases array is required" });
+      }
+
+      const mission = await generateAdaptiveSpeakingMission(phrases);
+      return sendJson(res, 200, { mission });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to generate adaptive speaking mission"
+      });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/v1/vocabulary/activation/evaluate") {
+    if (!OPENAI_API_KEY) {
+      return sendJson(res, 500, {
+        error: "OPENAI_API_KEY is not configured on backend proxy"
+      });
+    }
+
+    try {
+      const payload = await readJsonBody(req);
+      const responseText = String(payload?.response_text || "").trim();
+      const targetPhrases = Array.isArray(payload?.target_phrases) ? payload.target_phrases : [];
+      const context = payload?.context;
+
+      if (!targetPhrases.length) {
+        return sendJson(res, 400, { error: "target_phrases array is required" });
+      }
+
+      const evaluations = await evaluateVocabularyActivation({
+        responseText,
+        targetPhrases,
+        context
+      });
+
+      return sendJson(res, 200, { evaluations });
+    } catch (error) {
+      return sendJson(res, 500, {
+        error: error instanceof Error ? error.message : "Failed to evaluate vocabulary activation"
       });
     }
   }

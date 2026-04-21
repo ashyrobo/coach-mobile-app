@@ -10,6 +10,18 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
         let phrases: [String]
     }
 
+    private struct ActivationEvaluateRequest: Codable {
+        let responseText: String
+        let targetPhrases: [String]
+        let context: VocabularyActivationContext
+
+        enum CodingKeys: String, CodingKey {
+            case responseText = "response_text"
+            case targetPhrases = "target_phrases"
+            case context
+        }
+    }
+
     private struct ShadowingParagraphRequest: Codable {
         let phrases: [String]
     }
@@ -27,6 +39,10 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
     private struct SpeakingMissionResponse: Codable {
         let mission: SpeakingMission
+    }
+
+    private struct ActivationEvaluateResponse: Codable {
+        let evaluations: [VocabularyActivationEvaluation]
     }
 
     private struct BehavioralQuestionRequest: Codable {
@@ -159,6 +175,68 @@ final class VoiceProcessingAPIService: VoiceProcessingServicing {
 
             let payload = try JSONDecoder().decode(SpeakingMissionResponse.self, from: data)
             return payload.mission
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func generateAdaptiveSpeakingMission(from phrases: [String]) async throws -> SpeakingMission {
+        var request = URLRequest(url: AppConfig.adaptiveSpeakingMissionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let cleanPhrases = phrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        request.httpBody = try JSONEncoder().encode(SpeakingMissionRequest(phrases: cleanPhrases))
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(SpeakingMissionResponse.self, from: data)
+            return payload.mission
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.networkError(error.localizedDescription)
+        }
+    }
+
+    func evaluateVocabularyActivation(
+        responseText: String,
+        targetPhrases: [String],
+        context: VocabularyActivationContext
+    ) async throws -> [VocabularyActivationEvaluation] {
+        var request = URLRequest(url: AppConfig.vocabularyActivationEvaluateURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let cleanResponseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTargets = targetPhrases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        request.httpBody = try JSONEncoder().encode(
+            ActivationEvaluateRequest(
+                responseText: cleanResponseText,
+                targetPhrases: cleanTargets,
+                context: context
+            )
+        )
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.invalidResponse
+            }
+
+            let payload = try JSONDecoder().decode(ActivationEvaluateResponse.self, from: data)
+            return payload.evaluations
         } catch let error as AppError {
             throw error
         } catch {
